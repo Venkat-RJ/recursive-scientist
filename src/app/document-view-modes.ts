@@ -2,15 +2,18 @@ import type { CanvasMode, DocumentViewMode } from "../app-types";
 import { isBibFilePath, isHtmlFilePath, isPreviewableSourceFilePath } from "../app-utils";
 
 /**
- * The views readable documents return to: each HTML file its own (Preview
- * until one is chosen), a bibliography the one last chosen for
- * bibliographies, and LaTeX and Markdown the one last chosen for either.
+ * Markdown and HTML open in Preview until a view is chosen for that file.
+ * Bibliographies and LaTeX each remember the view last chosen for their kind.
  */
 export type RememberedViewModes = {
-  html: ReadonlyMap<string, DocumentViewMode>;
+  files: ReadonlyMap<string, DocumentViewMode>;
   bib: DocumentViewMode;
   document: DocumentViewMode;
 };
+
+export function hasPerFileViewMode(path: string): boolean {
+  return /\.md$/i.test(path) || isHtmlFilePath(path);
+}
 
 /**
  * The view `path` opens in: what the canvas switches to when it loads, and
@@ -18,7 +21,7 @@ export type RememberedViewModes = {
  * document with a single view, which keeps the canvas's.
  */
 export function rememberedViewMode(path: string, modes: RememberedViewModes): DocumentViewMode | null {
-  if (isHtmlFilePath(path)) return modes.html.get(path) ?? "pdf";
+  if (hasPerFileViewMode(path)) return modes.files.get(path) ?? "pdf";
   if (isBibFilePath(path)) return modes.bib;
   if (isPreviewableSourceFilePath(path)) return modes.document;
   return null;
@@ -30,14 +33,14 @@ export function rememberedViewMode(path: string, modes: RememberedViewModes): Do
  * PDF is a panel of its own).
  */
 export function panelViewMode(path: string, modes: RememberedViewModes): DocumentViewMode {
-  const readable = /\.md$/i.test(path) || isHtmlFilePath(path) || isBibFilePath(path);
+  const readable = hasPerFileViewMode(path) || isBibFilePath(path);
   return (readable && rememberedViewMode(path, modes)) || "source";
 }
 
 /**
  * The canvas mode loading `path` switches to from `current`: its remembered
- * view, else the source when the open asks for it, else what LaTeX and
- * Markdown return to when leaving a document with views of its own, else
+ * view, else the source when the open asks for it, else what LaTeX returns
+ * to when leaving a document with views of its own, else
  * the current one (an asset's widened back to Split).
  */
 export function modeOnLoad(
@@ -46,13 +49,13 @@ export function modeOnLoad(
   const remembered = rememberedViewMode(path, modes);
   if (remembered) return remembered;
   if (revealSource) return "source";
-  if (isHtmlFilePath(previousPath) || isBibFilePath(previousPath)) return modes.document;
+  if (hasPerFileViewMode(previousPath) || isBibFilePath(previousPath)) return modes.document;
   return current === "asset" ? "split" : current;
 }
 
-/** Whether `mode`, shown for `path`, is the view LaTeX and Markdown return to. */
+/** Whether `mode`, shown for `path`, is the view LaTeX returns to. */
 export function setsDocumentMode(path: string, mode: CanvasMode): mode is DocumentViewMode {
-  return isPreviewableSourceFilePath(path) && !isHtmlFilePath(path) && mode !== "asset";
+  return isPreviewableSourceFilePath(path) && !hasPerFileViewMode(path) && mode !== "asset";
 }
 
 /** A canvas mode that brings an editor on screen, widening a preview-only or asset surface to split. */

@@ -26,7 +26,7 @@ it("opens a drawer it owns after bringing its content up to date, then reveals i
   act(() => view.result.current.open("checklist"));
   expect(refreshTodos).toHaveBeenCalledTimes(1);
   expect(refreshWordCount).toHaveBeenCalledTimes(1);
-  expect(view.result.current.isOpen).toEqual({ history: false, git: false, todos: false, checklist: true, start: false });
+  expect(view.result.current.isOpen).toEqual({ "web-knowledge": false, "github-knowledge": false, history: false, git: false, todos: false, checklist: true, "mind-map": false, formulation: false, "prior-knowledge": false, experiments: false, "research-progress": false, start: false });
   expect(trellis.revealOpenTool).toHaveBeenCalledWith("checklist");
 
   act(() => view.result.current.open("todos"));
@@ -66,7 +66,7 @@ it("routes comments to the surface the project uses and literature to its own dr
   act(() => view.result.current.open("literature"));
   expect(references.setLiteratureOpen).toHaveBeenCalledWith(true);
   expect(trellis.revealOpenTool).toHaveBeenLastCalledWith("literature");
-  expect(view.result.current.isOpen).toEqual({ history: false, git: false, todos: false, checklist: false, start: false });
+  expect(view.result.current.isOpen).toEqual({ "web-knowledge": false, "github-knowledge": false, history: false, git: false, todos: false, checklist: false, "mind-map": false, formulation: false, "prior-knowledge": false, experiments: false, "research-progress": false, start: false });
 });
 
 it("forgets the outgoing project's TODO list and turn review", () => {
@@ -78,7 +78,7 @@ it("forgets the outgoing project's TODO list and turn review", () => {
     view.result.current.open("git", { turnReview: review });
   });
   act(() => view.result.current.resetForProject());
-  expect(view.result.current.isOpen).toEqual({ history: true, git: true, todos: false, checklist: false, start: false });
+  expect(view.result.current.isOpen).toEqual({ "web-knowledge": false, "github-knowledge": false, history: true, git: true, todos: false, checklist: false, "mind-map": false, formulation: false, "prior-knowledge": false, experiments: false, "research-progress": false, start: false });
   expect(view.result.current.turnReview).toBeNull();
 });
 
@@ -99,4 +99,28 @@ it("closes Git when the source control embed asks to", () => {
     }));
   });
   expect(view.result.current.isOpen.git).toBe(false);
+});
+
+it("reveals Mind Map as a project tool and closes it when the project changes", () => {
+  const { view, trellis } = renderTools();
+  act(() => view.result.current.open("mind-map"));
+  expect(view.result.current.isOpen["mind-map"]).toBe(true);
+  expect(trellis.revealOpenTool).toHaveBeenCalledWith("mind-map");
+  act(() => view.result.current.resetForProject());
+  expect(view.result.current.isOpen["mind-map"]).toBe(false);
+});
+
+it("opens Research Progress and forwards experiment drill-through within the current project", () => {
+  const { view, trellis } = renderTools();
+  act(() => view.result.current.open("research-progress"));
+  expect(view.result.current.isOpen["research-progress"]).toBe(true);
+  expect(trellis.revealOpenTool).toHaveBeenCalledWith("research-progress");
+
+  act(() => view.result.current.open("experiments", { experimentId: "E-004" }));
+  expect(view.result.current.experimentSelection?.id).toBe("E-004");
+  act(() => view.result.current.open("experiments", { experimentId: "E-011" }));
+  expect(view.result.current.experimentSelection?.id).toBe("E-011");
+  act(() => view.result.current.resetForProject());
+  expect(view.result.current.experimentSelection).toBeUndefined();
+  expect(view.result.current.isOpen["research-progress"]).toBe(false);
 });

@@ -1,0 +1,80 @@
+--- a/apps/server/src/agentGateway/latticeLiteratureTools.ts
++++ b/apps/server/src/agentGateway/latticeLiteratureTools.ts
+@@ -249,6 +249,53 @@
+       invoke("cite", { query: readStringArg(args, "query", { required: true })! }, context),
+   };
+ 
++  const listWebSources: ToolEntry = {
++    requiredCapability: "literature:read",
++    definition: { name: "list_web_sources", description: "List the project's Knowledge from Web library. Sources have saved readable content and separate agent notes. Use read_web_source for text. Use your built-in web search and webpage reader to discover sources, then save_web_source to populate this library.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { title: "List web sources", ...READ_ONLY_TOOL_ANNOTATIONS } },
++    handler: (_args, context) => invoke("list_web_sources", {}, context),
++  };
++  const readWebSource: ToolEntry = {
++    requiredCapability: "literature:read",
++    definition: { name: "read_web_source", description: "Read saved source text, provenance and agent notes from Knowledge from Web.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false }, annotations: { title: "Read web source", ...READ_ONLY_TOOL_ANNOTATIONS } },
++    handler: (args, context) => invoke("read_web_source", { id: readStringArg(args, "id", { required: true })! }, context),
++  };
++  const saveWebSource: ToolEntry = {
++    requiredCapability: "literature:write", requiresActiveTurn: true,
++    definition: {
++      name: "save_web_source",
++      description: "Populate Knowledge from Web with source text you actually retrieved using your built-in web reader. Save verbatim source passages in content, and your interpretation separately in summary. Search snippets and generated summaries are not source text. Set contentKind to excerpt unless the complete page was retrieved. This saves into the shared Web library, automatically visible to the user, without creating bibliography entries. Re-saving a URL preserves the earlier capture. Use set_research_panel with action show and panel web-knowledge when presenting the library.",
++      inputSchema: { type: "object", properties: {
++        url: { type: "string" }, title: { type: "string" }, content: { type: "string", maxLength: 500000 },
++        contentKind: { type: "string", enum: ["excerpt", "full-text"] }, summary: { type: "string", maxLength: 20000 },
++      }, required: ["url", "title", "content", "contentKind", "summary"], additionalProperties: false },
++      annotations: { title: "Save web source", ...WRITE_TOOL_ANNOTATIONS },
++    },
++    handler: (args, context) => invoke("save_web_source", { source: {
++      url: readStringArg(args, "url", { required: true })!, title: readStringArg(args, "title", { required: true })!,
++      content: readStringArg(args, "content", { required: true })!, contentKind: readStringArg(args, "contentKind", { required: true })!,
++      summary: readStringArg(args, "summary") ?? "",
++    } }, context),
++  };
++
++  const searchWeb: ToolEntry = {
++    requiredCapability: "literature:read",
++    requiresActiveTurn: true,
++    definition: {
++      name: "search_web",
++      description:
++        "Optional Firecrawl search. Prefer your provider's built-in web search and reader, then save_web_source to populate Knowledge from Web with readable content.",
++      inputSchema: {
++        type: "object",
++        properties: { query: { type: "string", description: "A focused web query." } },
++        required: ["query"],
++        additionalProperties: false,
++      },
++      annotations: { title: "Search the web", ...READ_ONLY_TOOL_ANNOTATIONS, openWorldHint: true },
++    },
++    handler: (args, context) =>
++      invoke("search_web", { query: readStringArg(args, "query", { required: true })! }, context),
++  };
++
+   const fetchWebReference: ToolEntry = {
+     requiredCapability: "literature:write",
+     requiresActiveTurn: true,
+@@ -334,6 +381,10 @@
+     fetchPaper,
+     cite,
+     fetchWebReference,
++    searchWeb,
++    listWebSources,
++    readWebSource,
++    saveWebSource,
+     upgradeBibliography,
+     removeReference,
+   ];
+--- a/apps/server/src/agentGateway/hostProfile.ts
++++ b/apps/server/src/agentGateway/hostProfile.ts
+@@ -82,6 +82,10 @@
+   "fetch_paper",
+   "cite",
+   "fetch_web_reference",
++  "search_web",
++  "list_web_sources",
++  "read_web_source",
++  "save_web_source",
+   "upgrade_bibliography",
+   "remove_reference",
+   "list_canvas_shapes",

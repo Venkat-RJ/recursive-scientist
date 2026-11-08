@@ -9,6 +9,7 @@ import { confirmAction } from "../app-utils";
 import type { TrellisController } from "../trellis/trellis-controller";
 import { tauriTerminalBackend } from "./terminal-backend";
 import { createXtermScreen, type XtermScreen } from "./terminal-screen";
+import type { AgentTerminalUpdate } from "./agent-terminal-update";
 import { TerminalSessions } from "./terminal-sessions";
 
 export const terminals = new TerminalSessions<XtermScreen>(tauriTerminalBackend, createXtermScreen);
@@ -81,4 +82,13 @@ export function clearActiveTerminal() {
 export const findRequests = new Set<() => void>();
 export function findInActiveTerminal() {
   for (const request of findRequests) request();
+}
+
+export function reportAgentTerminal(controller: TrellisController, update: AgentTerminalUpdate) {
+  followProject(controller);
+  if (terminals.reportAgentCommand(update)) controller.showPanel("terminal", { focus: false });
+}
+
+export function revealAgentTerminal() {
+  terminals.revealAgentExecution();
 }

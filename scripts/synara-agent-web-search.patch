@@ -1,0 +1,152 @@
+--- a/apps/web/src/components/chat/useLatticeComposerPrompt.ts
++++ b/apps/web/src/components/chat/useLatticeComposerPrompt.ts
+@@ -4,8 +4,10 @@
+ // agent buttons route through here), with one `synara:composer-prompt-result`.
+ // Layer: Chat composer embed integration
+ 
+-import type { ProjectId, ThreadId } from "@synara/contracts";
++import { CommandId, MessageId, type ProjectId, ThreadId } from "@synara/contracts";
+ import { useEffect } from "react";
++import { deriveWorkLogEntries } from "../../workLog";
++import { ensureNativeApi } from "../../nativeApi";
+ 
+ import { useComposerDraftStore, type QueuedComposerChatTurn } from "../../composerDraftStore";
+ import { requestComposerFocus } from "../../composerFocusRequestStore";
+@@ -24,6 +26,39 @@
+ } from "../../lib/latticeComposerPrompt";
+ import type { NewThreadOptions } from "../../lib/threadBootstrap";
+ import type { TurnDispatchSettings } from "../ChatView.logic";
++
++/** Presentation only. Keep the original messages for the search relay and provider history. */
++export function displayLatticeWebSearch<T extends { role: string; text: string; streaming?: boolean }>(messages: readonly T[]): T[] {
++  let searchTurn = false;
++  return messages.map((message) => {
++    if (message.role === "user") {
++      searchTurn = /^\[lattice-web-search:[^\]]+\]\n/.test(message.text);
++      if (!searchTurn) return message;
++      const query = message.text.match(/search terms: ("(?:[^"\\]|\\.)*")\./);
++      if (!query) return message;
++      try { return { ...message, text: JSON.parse(query[1]!), textSegments: undefined }; }
++      catch { return message; }
++    }
++    if (!searchTurn || message.role !== "assistant") return message;
++    // Partial JSON is transport data. The native tool activity still shows progress.
++    if (message.streaming) return { ...message, text: "", textSegments: undefined };
++    try {
++      const raw = message.text.trim();
++      const data = JSON.parse(raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1] ?? raw);
++      if (!Array.isArray(data.results)) return message;
++      const text = data.results.slice(0, 12).flatMap((hit: { url?: unknown; title?: unknown; description?: unknown }) => {
++        if (typeof hit.url !== "string") return [];
++        let url: URL;
++        try { url = new URL(hit.url); } catch { return []; }
++        if (url.protocol !== "https:" && url.protocol !== "http:") return [];
++        const title = (typeof hit.title === "string" ? hit.title : url.hostname).replace(/[\\[\]<>]/g, "");
++        const description = typeof hit.description === "string" ? hit.description : "";
++        return [`[${title}](<${url.href.replace(/>/g, "%3E")}>)\n\n${description}`];
++      }).join("\n\n");
++      return { ...message, text, textSegments: undefined };
++    } catch { return message; }
++  });
++}
+ 
+ type PromptResult = Omit<SynaraComposerPromptResult, "type" | "version" | "requestId">;
+ 
+@@ -135,6 +170,59 @@
+   };
+ }
+ 
++async function runWebSearch(request: LatticeComposerPromptRequest, opts: LatticeComposerPromptOptions): Promise<PromptResult> {
++  const config = readEmbedMode();
++  if (!opts.projectId || !config?.hostOrigin || !(await opts.isProviderUsable())) {
++    return { ok: false, error: { code: "no-provider", message: "No search provider is ready." } };
++  }
++  const api = ensureNativeApi();
++  const threadId = ThreadId.makeUnsafe(`lattice-web-search:${request.requestId}`);
++  const createdAt = new Date().toISOString();
++  const { modelSelection, runtimeMode, providerOptions } = opts.turnDispatchSettings;
++  await api.orchestration.dispatchCommand({
++    type: "thread.create", commandId: CommandId.makeUnsafe(crypto.randomUUID()), threadId,
++    projectId: opts.projectId, title: "Web search", modelSelection, runtimeMode,
++    interactionMode: "default", envMode: "local", branch: null, worktreePath: null,
++    createdAt,
++  });
++  await api.orchestration.dispatchCommand({
++    type: "thread.turn.start", commandId: CommandId.makeUnsafe(crypto.randomUUID()), threadId,
++    message: { messageId: MessageId.makeUnsafe(crypto.randomUUID()), role: "user", text: request.text, attachments: [] },
++    modelSelection, runtimeMode, providerOptions, enableComputerControl: false,
++    interactionMode: "default", createdAt,
++  });
++  // Use orchestration directly: the user's selected conversation and composer stay put.
++  const collect = async () => {
++    const deadline = Date.now() + 115_000;
++    try {
++      while (Date.now() < deadline) {
++        await new Promise((resolve) => setTimeout(resolve, 750));
++        const snapshot = await api.orchestration.getThreadDetailSnapshot({ threadId });
++        const thread = snapshot?.thread;
++        if (!thread) continue;
++        if (thread.hasPendingApprovals || thread.hasPendingUserInput) throw new Error("Search needs approval");
++        if (thread.latestTurn?.state === "error" || thread.latestTurn?.state === "interrupted") throw new Error("Search failed");
++        if (thread.latestTurn?.state !== "completed") continue;
++        const answer = thread.messages.findLast((message) => message.role === "assistant");
++        const searched = deriveWorkLogEntries(thread.activities, thread.latestTurn?.turnId).some((entry) => entry.itemType === "web_search");
++        window.parent.postMessage({
++          type: "synara:web-search-result", version: 1, requestId: request.requestId,
++          workspaceRoot: config.workspaceRoot,
++          text: searched && answer ? answer.text.slice(0, 24_000) : '{"error":"web-search-unavailable"}',
++        }, config.hostOrigin!);
++        await api.orchestration.dispatchCommand({ type: "thread.archive", commandId: CommandId.makeUnsafe(crypto.randomUUID()), threadId }).catch(() => undefined);
++        return;
++      }
++      throw new Error("Search timed out");
++    } catch {
++      await api.orchestration.dispatchCommand({ type: "thread.turn.interrupt", commandId: CommandId.makeUnsafe(crypto.randomUUID()), threadId, createdAt: new Date().toISOString() }).catch(() => undefined);
++      postComposerPromptResultToLattice(config, { requestId: request.requestId, ok: false, error: { code: "send-failed", message: "The web search could not finish." } });
++    }
++  };
++  void collect();
++  return { ok: true, outcome: "sent", threadId };
++}
++
+ async function handleNewThread(
+   request: LatticeComposerPromptRequest,
+   opts: LatticeComposerPromptOptions,
+@@ -191,6 +279,7 @@
+   options: LatticeComposerPromptOptions,
+ ): Promise<PromptResult> {
+   try {
++    if (request.text.startsWith(`[lattice-web-search:${request.requestId}]\n`)) return await runWebSearch(request, options);
+     return request.thread === "new"
+       ? await handleNewThread(request, options)
+       : await handleActiveThread(request, options);
+--- a/apps/web/src/components/ChatView.tsx
++++ b/apps/web/src/components/ChatView.tsx
+@@ -179,7 +179,7 @@
+ import { useDiffRouteSearch } from "../hooks/useDiffRouteSearch";
+ import { useHandleNewChat } from "../hooks/useHandleNewChat";
+ import { useHandleNewThread } from "../hooks/useHandleNewThread";
+-import { useLatticeComposerPrompt } from "./chat/useLatticeComposerPrompt";
++import { useLatticeComposerPrompt, displayLatticeWebSearch } from "./chat/useLatticeComposerPrompt";
+ import { useLatticeAgentTerminal } from "./chat/useLatticeAgentTerminal";
+ import { useLatticeTurnActivity } from "./chat/useLatticeTurnActivity";
+ import { useUnavailableModelFallback } from "./chat/useUnavailableModelFallback";
+@@ -2214,7 +2214,7 @@
+   const timelineEntries = useMemo(
+     () =>
+       deriveTimelineEntries(
+-        timelineMessages,
++        displayLatticeWebSearch(timelineMessages),
+         activeThread?.proposedPlans ?? [],
+         agentActivityTimelineState.timelineWorkEntries,
+         // Coordinator check-in turns run in the background and never appear
+--- a/apps/web/src/notifications/taskCompletion.tsx
++++ b/apps/web/src/notifications/taskCompletion.tsx
+@@ -280,6 +280,7 @@
+       waitForSubagents: settings.notifyAfterSubagentsFinish,
+     }).filter(
+       (candidate) =>
++        !candidate.threadId.startsWith("lattice-web-search:") &&
+         isNotificationRuntimeFreshTimestamp(candidate.completedAt, runtimeStartedAtMs) &&
+         !snoozedThreadIds.has(candidate.threadId) &&
+         !notifiedCompletionKeysRef.current.has(completedThreadNotificationKey(candidate)),

@@ -1,3 +1,4 @@
+import { searchWithAgent } from "../agent/agent-web-search";
 /**
  * What App renders into the Trellis panels' hosts by portal: the project file
  * tree, the paper library, the agent, each panel's tab-bar action row, and the
@@ -24,7 +25,7 @@ import { PanelErrorBoundary } from "../telemetry/panel-error-boundary";
 import { PanelActions } from "../trellis/trellis-panel-actions";
 import type { GitStatus, PaperSummary, ProjectSnapshot } from "../app-types";
 import { toMessage } from "../app-utils";
-import { PaperLibrary, ProjectFileTree, TrellisAgentSurface } from "./app-lazy-panels";
+import { PaperLibrary, ProjectFileTree, TrellisAgentSurface, WebKnowledge } from "./app-lazy-panels";
 import { useStableHandlers } from "./effect-helpers";
 import { showError, showNotice } from "./notify";
 import { OpeningOverlay } from "./opening-overlay";
@@ -65,7 +66,7 @@ export function usePanelPortals({
   referenceImport: ReferenceImport;
   openSymbolOccurrence: (occurrence: SymbolOccurrence) => Promise<void>;
   synara: SynaraHost;
-  tools: Pick<ToolDrawers, "open">;
+  tools: Pick<ToolDrawers, "open" | "close" | "isOpen">;
   checkReferences: () => void;
 }) {
   const { file: activeFile, paper: activePaper, asset: activeAsset, openPaper } = documents;
@@ -83,6 +84,7 @@ export function usePanelPortals({
   const panelActionHandlers = useStableHandlers({
     onCheckReferences: checkReferences,
     onDiscoverLiterature: () => tools.open("literature"),
+    onWebKnowledge: () => tools.open("web-knowledge"),
   });
   const trellisActions = useMemo(() => {
     const actions = (mode: "project" | "papers" | "agent") => (
@@ -207,6 +209,18 @@ export function usePanelPortals({
         </PanelErrorBoundary>,
         trellis.hosts.papers,
       )}
+      {(["web-knowledge", "github-knowledge"] as const).map((kind) => tools.isOpen[kind] && <Suspense key={kind} fallback={null}>
+        <WebKnowledge key={project.root} github={kind === "github-knowledge"} root={project.root} onClose={() => tools.close(kind)}
+          searchWeb={(query, signal, read) => searchWithAgent(project.root, query, signal, (message) => {
+            if (!synara.frameReady) trellis.showPanel("agent", { focus: false });
+            synara.sendComposerPrompt(message);
+          }, read)}
+          claimRead={() => {
+            const claim = documents.claim();
+            return { isCurrent: claim.isCurrent, open: (path) => { void documents.openFile(path); } };
+          }}
+        />
+      </Suspense>)}
       {createPortal(trellisActions.project, trellis.hosts.projectActions)}
       {createPortal(trellisActions.papers, trellis.hosts.papersActions)}
       {createPortal(trellisActions.agent, trellis.hosts.agentActions)}

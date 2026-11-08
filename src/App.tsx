@@ -1,3 +1,4 @@
+import { loadTerminalPanel } from "./terminal/terminal-load";
 import {
   Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type SetStateAction,
@@ -101,6 +102,7 @@ import type {
 import {
   isWholeFileEditorPath,
   toMessage,
+  isScientificResearchProject,
 } from "./app-utils";
 // setError / setWarning / setNotice are the toast shims; they
 // live beside the hooks extracted out of this file so both can use them.
@@ -294,6 +296,16 @@ function App({ surfaces }: { surfaces: AppSurfaces }) {
       annotationTools: () => projectRootRef.current ? annotationRounds.toolHost : null,
       projectDocumentCreator: () => agentProjectDocumentCreatorRef.current,
       onHistorySnapshot: (snapshot) => agentCheckpoints.handleSnapshot(snapshot),
+      setResearchPanel: (panel, action) => {
+        if (action === "show") tools.open(panel);
+        else tools.close(panel);
+      },
+      onAgentTerminal: (update) => {
+        if (browserHosted) return;
+        void loadTerminalPanel().then((terminal) => {
+          if (projectRootRef.current === update.workspaceRoot) terminal.reportAgentTerminal(trellis, update);
+        });
+      },
       onMinimumWidth: (width) => trellis.ui.set({ agentMinWidth: width }),
     },
   });
@@ -634,7 +646,7 @@ function App({ surfaces }: { surfaces: AppSurfaces }) {
 
   const sourceNavigation = useSourceNavigation({
     project, projectRef, papers, documents, library, forgetIncludedSources, updateCanvasRequest, tree,
-    openProjectPathRef: openMarkdownProjectPathRef,
+    openProjectPathRef: openMarkdownProjectPathRef, openTool: tools.open,
   });
   const {
     openMarkdownProjectPath, beginSymbolRename, openSymbolOccurrence, referenceHits, dismissReferenceHits, rename,
@@ -853,7 +865,7 @@ function App({ surfaces }: { surfaces: AppSurfaces }) {
       <main className="workspace trellis-workspace">
         <ChunkGate chunk={loadTrellisWorkspace} fallback={workspaceLoading}>
           <Suspense fallback={workspaceLoading}>
-            <TrellisWorkspace key={project.root} controller={trellis} projectRoot={project.root} dark={theme === "dark"} focusMode={focusMode} />
+            <TrellisWorkspace key={project.root} controller={trellis} projectRoot={project.root} dark={theme === "dark"} focusMode={focusMode} research={isScientificResearchProject(project.manifest.venue)} />
           </Suspense>
         </ChunkGate>
         {panelPortals}

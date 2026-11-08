@@ -66,7 +66,7 @@ fn relevant(event: &Event, root: &Path) -> bool {
             // as relevant rather than silently dropping a real change.
             Err(_) => return true,
         };
-        !relative.starts_with(".research")
+        !relative.starts_with(".research") || relative.starts_with(".research/web")
     })
 }
 
@@ -244,6 +244,7 @@ mod tests {
             (&[".git/index"], true),
             (&[".research/history/x.json"], false),
             (&[".research/papers/2401.00001/paper.md"], false),
+            (&[".research/web/source/capture.json"], true),
             // Mixed bursts stay relevant if any path matters.
             (&[".research/cache/fts.sqlite", "notes.md"], true),
         ] {

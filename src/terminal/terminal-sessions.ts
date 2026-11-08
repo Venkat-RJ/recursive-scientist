@@ -1,3 +1,5 @@
+import type { AgentTerminalUpdate } from "./agent-terminal-update";
+
 /**
  * The window's terminals: one shell per tab, in the project folder, kept
  * apart from the panel that shows them.
@@ -43,6 +45,8 @@ export type TerminalScreen = {
   write: (data: Uint8Array, done: () => void) => void;
   /** A line from Lattice itself, not the shell (dimmed). */
   note: (text: string) => void;
+  reset?: () => void;
+  follow?: () => void;
   onInput: (listener: (data: string) => void) => void;
   onResize: (listener: (cols: number, rows: number) => void) => void;
   dispose: () => void;
@@ -53,6 +57,7 @@ export type TerminalSession<S extends TerminalScreen = TerminalScreen> = {
   key: number;
   /** Shown as "Terminal {number}" until renamed. */
   number: number;
+  agent?: true;
   name: string | null;
   /** The shell's program ("zsh"), once started. */
   shell: string;
@@ -61,7 +66,12 @@ export type TerminalSession<S extends TerminalScreen = TerminalScreen> = {
   state: { kind: "starting" | "running" } | { kind: "exited"; code: number | null } | { kind: "failed"; message: string };
 };
 
-type Snapshot<S extends TerminalScreen> = { sessions: readonly TerminalSession<S>[]; active: number | null };
+type Snapshot<S extends TerminalScreen> = {
+  sessions: readonly TerminalSession<S>[];
+  active: number | null;
+  executions: readonly AgentTerminalUpdate[];
+  executionId: string | null;
+};
 
 /** Output the window draws before it tells the host (see `ack`). */
 const ACK_EVERY = 64 * 1024;
@@ -70,14 +80,16 @@ type Internal<S extends TerminalScreen> = { session: TerminalSession<S>; id: num
 
 export class TerminalSessions<S extends TerminalScreen = TerminalScreen> {
   private items: Internal<S>[] = [];
-  private snapshot: Snapshot<S> = { sessions: [], active: null };
+  private snapshot: Snapshot<S> = { sessions: [], active: null, executions: [], executionId: null };
   private listeners = new Set<() => void>();
   private nextKey = 1;
   private root = "";
+  private agentCommands = new Map<string, AgentTerminalUpdate>();
+  private executionId: string | null = null;
 
   constructor(
     private readonly backend: TerminalBackend,
-    private readonly createScreen: () => S,
+    private readonly createScreen: (readOnly?: boolean) => S,
   ) {}
 
   subscribe = (listener: () => void) => {
@@ -94,14 +106,17 @@ export class TerminalSessions<S extends TerminalScreen = TerminalScreen> {
 
   setProject(root: string) {
     if (root === this.root) return;
-    this.endAll();
+    this.agentCommands.clear();
+    this.executionId = null;
     this.root = root;
+    if (this.items.length) this.endAll();
+    else this.publish(null);
   }
 
   /** Start a terminal in the project folder and make it the active tab. */
   open(): TerminalSession<S> | null {
     if (!this.root) return null;
-    const used = new Set(this.items.map(({ session }) => session.number));
+    const used = new Set(this.items.filter(({ session }) => !session.agent).map(({ session }) => session.number));
     let number = 1;
     while (used.has(number)) number += 1;
     const screen = this.createScreen();
@@ -160,6 +175,69 @@ export class TerminalSessions<S extends TerminalScreen = TerminalScreen> {
     return session;
   }
 
+  /** Keep a bounded view of Synara's execution records, even with the pane closed. */
+  reportAgentCommand(update: AgentTerminalUpdate): boolean {
+    if (!this.root || update.workspaceRoot !== this.root) return false;
+    const { reveal, ...record } = update;
+    const previous = this.agentCommands.get(record.id);
+    if (reveal && previous) return this.revealAgentExecution(record.id);
+    const isFinal = previous && previous.status !== "running" && previous.status !== "unknown";
+    // A delayed live snapshot cannot undo a confirmed terminal outcome.
+    const next = isFinal && (record.status === "running" || record.status === "unknown") ? previous : record;
+    const changed = JSON.stringify(previous) !== JSON.stringify(next);
+    if (changed) {
+      this.agentCommands.set(record.id, next);
+      if (this.agentCommands.size > 100) {
+        const oldest = [...this.agentCommands.values()].filter((entry) => entry.id !== this.executionId && entry.id !== record.id)
+          .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""))[0];
+        if (oldest) this.agentCommands.delete(oldest.id);
+      }
+    }
+    if (changed) {
+      const item = this.items.find(({ session }) => session.agent);
+      if (item && this.executionId === record.id) this.drawAgentExecution(item.session.screen, next, previous);
+    }
+    if (reveal) return this.revealAgentExecution(record.id);
+    if (changed) this.publish(this.snapshot.active);
+    return false;
+  }
+
+  revealAgentExecution(id?: string): boolean {
+    const record = id ? this.agentCommands.get(id) : this.snapshot.executions[0];
+    if (!record) return false;
+    let item = this.items.find(({ session }) => session.agent);
+    if (!item) {
+      const session: TerminalSession<S> = {
+        key: this.nextKey++, number: 0, name: null, agent: true, shell: "",
+        screen: this.createScreen(true), state: { kind: "running" },
+      };
+      item = { session, id: null, queued: [], drawn: 0, closed: false };
+      this.items.push(item);
+      this.executionId = null;
+    }
+    if (this.executionId !== record.id) {
+      this.executionId = record.id;
+      item.session.screen.reset?.();
+      this.drawAgentExecution(item.session.screen, record);
+    }
+    this.publish(item.session.key);
+    return true;
+  }
+
+  private drawAgentExecution(screen: S, record: AgentTerminalUpdate, previous?: AgentTerminalUpdate) {
+    const before = previous?.output ?? "";
+    if (!previous || !record.output.startsWith(before)) {
+      if (previous) screen.reset?.();
+      screen.note(terminalText(`$ ${record.command}`, false));
+    }
+    const output = record.output.startsWith(before) ? record.output.slice(before.length) : record.output;
+    if (output) screen.write(new TextEncoder().encode(terminalText(output, true)), () => {});
+    if (record.status !== "running" && (!previous || previous.status !== record.status || previous.exitCode !== record.exitCode || previous.output !== record.output)) {
+      if (record.truncated) screen.note("[Output truncated]");
+      screen.note(record.exitCode === null ? `[${record.status}]` : `[${record.status}, exit code ${record.exitCode}]`);
+    }
+  }
+
   select(key: number) {
     if (this.items.some(({ session }) => session.key === key)) this.publish(key);
   }
@@ -167,7 +245,7 @@ export class TerminalSessions<S extends TerminalScreen = TerminalScreen> {
   rename(key: number, name: string) {
     const item = this.items.find(({ session }) => session.key === key);
     const trimmed = name.trim();
-    if (item) this.update(item, { name: trimmed || null });
+    if (item && !item.session.agent) this.update(item, { name: trimmed || null });
   }
 
   /** What closing these terminals would stop, by command name ("" when unnamed). */
@@ -183,6 +261,7 @@ export class TerminalSessions<S extends TerminalScreen = TerminalScreen> {
     if (index < 0) return;
     const [item] = this.items.splice(index, 1);
     this.end(item);
+    if (item.session.agent) this.executionId = null;
     const active = this.snapshot.active === key
       ? (this.items[index] ?? this.items[index - 1])?.session.key ?? null
       : this.snapshot.active;
@@ -192,6 +271,7 @@ export class TerminalSessions<S extends TerminalScreen = TerminalScreen> {
   /** Close every tab, ending every shell. */
   endAll() {
     if (!this.items.length) return;
+    this.executionId = null;
     for (const item of this.items.splice(0)) this.end(item);
     this.publish(null);
   }
@@ -223,7 +303,22 @@ export class TerminalSessions<S extends TerminalScreen = TerminalScreen> {
 
   private publish(active: number | null) {
     const sessions = this.items.map(({ session }) => session);
-    this.snapshot = { sessions, active: sessions.some((session) => session.key === active) ? active : sessions.at(-1)?.key ?? null };
+    this.snapshot = {
+      sessions, active: sessions.some((session) => session.key === active) ? active : sessions.at(-1)?.key ?? null,
+      executions: [...this.agentCommands.values()].reverse().sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? "")),
+      executionId: this.executionId,
+    };
     for (const listener of [...this.listeners]) listener();
   }
+}
+
+/** Allow styling and carriage returns, but discard terminal control requests. */
+function terminalText(value: string, output: boolean): string {
+  // eslint-disable-next-line no-control-regex
+  const style = /^\x1b\[[\d;:]*m$/;
+  return value
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)|\x1b\[[0-?]*[ -/]*[@-~]|[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f-\x9f]/g, (sequence) =>
+      output && style.test(sequence) ? sequence : "")
+    .replace(/\r?\n/g, "\r\n");
 }

@@ -13,6 +13,27 @@ use std::time::{Duration, Instant};
 use tauri::{Emitter, State, Window};
 
 #[tauri::command]
+pub async fn read_prior_knowledge(
+    state: State<'_, AppState>, window: Window, project_root: String,
+) -> Result<Option<String>, String> {
+    let root = pinned_root(&state, &window, &project_root, "Prior Knowledge could be read")?;
+    run_blocking("Read Prior Knowledge", move || project::read_prior_knowledge(&root)).await
+}
+
+#[tauri::command]
+pub async fn write_prior_knowledge(
+    state: State<'_, AppState>, window: Window, project_root: String, expected: Option<String>,
+    content: String,
+) -> Result<(), String> {
+    let _lease = state.structural_lease(&project_root, Lease::Exclusive).await;
+    let root = pinned_root(&state, &window, &project_root, "Prior Knowledge could be saved")?;
+    run_blocking("Save Prior Knowledge", move || {
+        project::write_prior_knowledge(&root, expected, content)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn list_project_tree_with_hidden(
     state: State<'_, AppState>, window: Window, project_root: String,
 ) -> Result<Vec<models::FileNode>, String> {
@@ -367,4 +388,22 @@ pub async fn read_annotation_round(
         project::read_annotation_round(root, number)
     })
     .await
+}
+
+#[tauri::command]
+pub async fn list_web_sources(state: State<'_, AppState>, window: Window, project_root: String) -> Result<serde_json::Value, String> {
+    let root = pinned_root(&state, &window, &project_root, "reading web sources")?;
+    run_blocking("Web library", move || crate::web_knowledge::list(&root)).await
+}
+
+#[tauri::command]
+pub async fn read_web_source(state: State<'_, AppState>, window: Window, project_root: String, id: String) -> Result<crate::web_knowledge::WebSource, String> {
+    let root = pinned_root(&state, &window, &project_root, "reading a web source")?;
+    run_blocking("Read web source", move || crate::web_knowledge::read(&root, &id)).await
+}
+
+#[tauri::command]
+pub async fn save_web_source(state: State<'_, AppState>, window: Window, project_root: String, source: crate::web_knowledge::SourceInput) -> Result<crate::web_knowledge::WebSource, String> {
+    let root = pinned_root(&state, &window, &project_root, "saving a web source")?;
+    run_blocking("Save web source", move || crate::web_knowledge::save(&root, source, "human")).await
 }

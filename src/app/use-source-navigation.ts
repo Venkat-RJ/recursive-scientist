@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState, type RefObject } from "react";
 import { useLingui } from "@lingui/react/macro";
 import { invoke } from "@tauri-apps/api/core";
 import { bibliographyEntryLine, type DefinitionTarget, type SymbolTarget } from "../editor/latex/latex-text";
+import { parseKnowledgeReference } from "../project/prior-knowledge/knowledge-reference";
 import { parsePaperLinkPath } from "../papers/paper-link";
 import { flattenProjectPaths } from "../build/compile-diagnostics";
 import type { SymbolOccurrence } from "../project/references-panel";
@@ -19,10 +20,11 @@ import { submitSymbolRename, type ReferenceHits } from "./symbol-rename-action";
 import type { UpdateCanvasRequest } from "./use-canvas-requests";
 import type { OpenDocuments } from "./use-open-documents";
 import type { useProjectLibrary } from "./use-project-library";
+import type { ToolDrawers } from "./use-tool-drawers";
 import type { useProjectTree } from "./use-project-tree";
 
 export function useSourceNavigation({
-  project, projectRef, papers, documents, library, forgetIncludedSources, updateCanvasRequest, tree, openProjectPathRef,
+  project, projectRef, papers, documents, library, forgetIncludedSources, updateCanvasRequest, tree, openProjectPathRef, openTool,
 }: {
   project: ProjectSnapshot | null;
   projectRef: RefObject<ProjectSnapshot | null>;
@@ -34,6 +36,7 @@ export function useSourceNavigation({
   tree: Pick<ReturnType<typeof useProjectTree>, "openFileFromClick" | "openAssetFromClick">;
   /** Where the agent's links reach `openMarkdownProjectPath`: the Synara host is set up before it. */
   openProjectPathRef: RefObject<(path: string) => void>;
+  openTool?: ToolDrawers["open"];
 }) {
   const { t } = useLingui();
   const { file: activeFile, text: source, openFile, openAsset, openPaper, load: loadFile } = documents;
@@ -44,6 +47,11 @@ export function useSourceNavigation({
   const [renameError, setRenameError] = useState<string | null>(null);
 
   const openMarkdownProjectPath = useCallback((path: string) => {
+    const knowledge = parseKnowledgeReference(path);
+    if (knowledge && projectRef.current && openTool) {
+      openTool("prior-knowledge", { knowledgeReference: knowledge });
+      return;
+    }
     const resolvedPath = resolveKnownWholeFileProjectPath(
       path,
       flattenProjectPaths(projectRef.current?.files ?? []),
@@ -64,7 +72,7 @@ export function useSourceNavigation({
     }
     if (isProjectAssetFilePath(resolvedPath)) openProjectAssetFromClick(resolvedPath);
     else openProjectFileFromClick(resolvedPath);
-  }, [openPaper, openProjectAssetFromClick, openProjectFileFromClick, papers, projectRef]);
+  }, [openPaper, openProjectAssetFromClick, openProjectFileFromClick, openTool, papers, projectRef]);
   useEffect(() => {
     openProjectPathRef.current = openMarkdownProjectPath;
   }, [openMarkdownProjectPath, openProjectPathRef]);

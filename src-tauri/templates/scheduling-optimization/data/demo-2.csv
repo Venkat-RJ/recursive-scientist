@@ -1,0 +1,9 @@
+job_index,processing_time,tardiness_unit_time_cost,due_date
+11,4,5,25
+18,6,6,21
+25,7,2,4
+32,4,8,1
+39,5,4,24
+46,6,8,42
+53,7,2,39
+60,11,5,35

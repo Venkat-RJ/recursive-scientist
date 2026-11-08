@@ -1,15 +1,16 @@
 import type { CanvasMode, FileNode, PaperSummary, ProjectSnapshot } from "../app-types";
 import {
   isBibFilePath,
-  isHtmlFilePath,
   isPaperTabKey,
   isPreviewableSourceFilePath,
   isProjectAssetFilePath,
   isProjectSourceFilePath,
+  isScientificResearchProject,
   paperTabKey,
 } from "../app-utils";
 import { flattenProjectPaths } from "../build/compile-diagnostics";
 import type { WorkspaceLayout } from "../settings/app-settings";
+import { hasPerFileViewMode } from "./document-view-modes";
 
 /** Every non-directory path in the tree that `include` accepts, in tree order. */
 export function collectFilePaths(nodes: FileNode[], include: (node: FileNode) => boolean, paths: string[] = []): string[] {
@@ -37,8 +38,9 @@ function restoredCanvasMode(
   const saved = layout?.canvasMode;
   if (kind === "paper") return saved === "source" || saved === "split" ? saved : "pdf";
   if (kind === "asset") return "asset";
-  if (isHtmlFilePath(activeTab)) {
-    return layout?.activeTab === activeTab && (saved === "source" || saved === "split" || saved === "pdf") ? saved : "pdf";
+  if (hasPerFileViewMode(activeTab)) {
+    const savedTab = layout?.activeTab ?? layout?.activeFile;
+    return savedTab === activeTab && (saved === "source" || saved === "split" || saved === "pdf") ? saved : "pdf";
   }
   if (isBibFilePath(activeTab)) {
     return layout?.activeTab === activeTab && (saved === "source" || saved === "split" || saved === "pdf") ? saved : layout?.bibMode ?? "source";
@@ -81,7 +83,13 @@ export function planWorkspaceRestore(
   // In place of a Paper that can no longer be read, open the project's root
   // document rather than whichever file happened to sit behind the Paper.
   const unreadablePaper = Boolean(layout?.activeTab && isPaperTabKey(layout.activeTab) && !paperKeys.has(layout.activeTab));
-  const primaryFile: string | undefined = [unreadablePaper ? rootDocument?.path : null, layout?.activeFile, lastFile, rootDocument?.path]
+  const templateEntry = isScientificResearchProject(snapshot.manifest.venue)
+    // eslint-disable-next-line lingui/no-unlocalized-strings -- bundled project-relative filenames
+    ? ["main.md", "RESEARCH.md"].find((path) => sourcePaths.has(path))
+    : undefined;
+  const primaryFile: string | undefined = [
+    unreadablePaper ? rootDocument?.path : null, layout?.activeFile, lastFile, rootDocument?.path, templateEntry,
+  ]
     .find((path): path is string => Boolean(path) && sourcePaths.has(path!)) ?? [...sourcePaths][0];
 
   const tabs = layout ? layout.openTabs.filter(validTab) : primaryFile ? [primaryFile] : [];

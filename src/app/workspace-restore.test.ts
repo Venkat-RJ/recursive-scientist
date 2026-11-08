@@ -21,6 +21,25 @@ const layout = (activeTab: string) => ({
 }) as WorkspaceLayout;
 
 describe("workspace restore", () => {
+  it("opens the research brief for a new scheduling project and respects saved files", () => {
+    const scheduling = {
+      ...snapshot,
+      files: [file("DATA_SOURCES.md"), file("candidate.py"), file("RESEARCH.md"), file("main.md")],
+      manifest: { ...snapshot.manifest, rootDocuments: [], venue: "scheduling-optimization" },
+    };
+    expect(planWorkspaceRestore(scheduling, [], null, null)).toMatchObject({
+      activeTab: "main.md",
+      mode: "pdf",
+      activeKind: "document",
+      tabs: ["main.md"],
+    });
+    expect(planWorkspaceRestore({ ...scheduling, files: [file("DATA_SOURCES.md"), file("RESEARCH.md")] }, [], null, null).activeTab)
+      .toBe("RESEARCH.md");
+    expect(planWorkspaceRestore(scheduling, [], null, "candidate.py").activeTab).toBe("candidate.py");
+    expect(planWorkspaceRestore({ ...scheduling, files: [file("candidate.py")] }, [], null, null).activeTab)
+      .toBe("candidate.py");
+  });
+
   it("reopens a Paper tab that can still be read", () => {
     const plan = planWorkspaceRestore(snapshot, [vit], layout(paperTabKey(vit.arxivId)), null);
     expect(plan).toMatchObject({

@@ -163,3 +163,18 @@
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
+
+.agent-terminal-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+}
+
+.agent-terminal-controls select {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}

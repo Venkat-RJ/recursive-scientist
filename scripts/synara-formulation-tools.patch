@@ -1,0 +1,344 @@
+--- a/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts
++++ b/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts
+@@ -28,7 +28,7 @@
+     string,
+     {
+       readonly workspaceRoot: string;
+-      readonly resultKind: "mind_map" | "experiments" | undefined;
++      readonly resultKind: "mind_map" | "experiments" | "formulation" | undefined;
+       readonly resolve: (value: unknown) => void;
+       readonly reject: (error: LatticeProjectDocumentBrokerError) => void;
+       readonly timer: ReturnType<typeof setTimeout>;
+@@ -64,7 +64,9 @@
+             "operation" in args
+               ? args.operation.startsWith("experiment_")
+                 ? "experiments"
+-                : "mind_map"
++                : args.operation.startsWith("formulation_")
++                  ? "formulation"
++                  : "mind_map"
+               : undefined,
+           resolve: (value) => resume(Effect.succeed(value)),
+           reject: (error) => resume(Effect.fail(error)),
+--- a/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts
++++ b/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts
+@@ -12,6 +12,11 @@
+   | { readonly operation: "experiment_read"; readonly id?: string }
+   | { readonly operation: "experiment_write"; readonly input: Record<string, unknown> };
+ 
++export type LatticeFormulationArgs =
++  | { readonly operation: "formulation_read"; readonly revision?: number }
++  | { readonly operation: "formulation_validate" }
++  | { readonly operation: "formulation_write"; readonly input: Record<string, unknown> };
++
+ export interface LatticeProjectDocumentRequest {
+   readonly id: string;
+   readonly args:
+@@ -20,7 +25,8 @@
+         readonly documentType: LatticeProjectDocumentType;
+       }
+     | LatticeMindMapArgs
+-    | LatticeExperimentArgs;
++    | LatticeExperimentArgs
++    | LatticeFormulationArgs;
+   readonly expiresAt: number;
+ }
+ 
+--- a/apps/server/src/agentGateway/harnessPolicy.ts
++++ b/apps/server/src/agentGateway/harnessPolicy.ts
+@@ -50,6 +50,7 @@
+             "For two or more independent tasks, submit one exact create_tasks batch. The array length must equal the requested task count; do not replace a failed durable operation with extra tasks.",
+             "When delegated results are needed, call wait_for_tasks for every created task id and repeat it with the returned runIds until allTerminal is true, then synthesize all outcomes. Use send_message_to_task only for a scoped follow-up and interrupt_task only when work should stop.",
+             "Provider-native subagents may be used for internal parallel work. Lattice tasks are durable project conversations; use create_task or create_tasks when the user needs separately inspectable task history.",
++            "When asked to solve or improve a scientific or benchmark problem in Lattice, use formulation_read first, read main.md if it exists, and investigate the local implementation, baseline, evidence and uncertainties. Use formulation_write to record facts with sources, separate assumptions and hypotheses, and define the objective, benchmark, metrics, correctness and success criteria. Use formulation_validate and request_review when ready. Present the draft and wait for human approval before substantial experimentation. Resume from the latest approved revision. For any protocol change, explain why in a new draft and ask for fresh approval. Use these native tools rather than editing problem-formulation.json directly.",
+             "When the user works in Experiments, read existing records with experiments_read and use experiments_write to record plans, progress, evidence and findings. Link saved results and leave approval, rejection and verification to the user.",
+             "Use mind_map_read to inspect the active project Mind Map and mind_map_update to add, rename, or delete its nodes. Use the returned node IDs.",
+             "Use create_project_document to create and open a native Lattice board or spreadsheet. After it succeeds for a board, use create_canvas_shapes to populate the newly opened canvas; after it succeeds for a spreadsheet, use spreadsheet_batch_update to populate the new workbook. Never create either native format by writing its serialized file contents directly.",
+--- a/apps/server/src/agentGateway/hostProfile.ts
++++ b/apps/server/src/agentGateway/hostProfile.ts
+@@ -93,6 +93,9 @@
+   "create_project_document",
+   "mind_map_read",
+   "mind_map_update",
++  "formulation_read",
++  "formulation_validate",
++  "formulation_write",
+   "experiments_read",
+   "experiments_write",
+   "read_editor_comments",
+--- a/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts
++++ b/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts
+@@ -34,6 +34,22 @@
+ }
+ 
+ function isSuccessResult(value: unknown): boolean {
++  if (isRecord(value) && value.kind === "formulation") {
++    return (
++      hasOnlyKeys(value, [
++        "kind",
++        "latestRevision",
++        "latestApproved",
++        "validation",
++        "revision",
++        "history",
++        "projectContext",
++      ]) &&
++      Number.isSafeInteger(value.latestRevision) &&
++      (value.latestApproved === null || Number.isSafeInteger(value.latestApproved)) &&
++      isRecord(value.validation)
++    );
++  }
+   if (isRecord(value) && value.kind === "experiments") {
+     return (
+       (hasOnlyKeys(value, ["kind", "experiment"]) &&
+--- a/apps/server/src/agentGateway/latticeProjectDocumentTools.ts
++++ b/apps/server/src/agentGateway/latticeProjectDocumentTools.ts
+@@ -7,6 +7,7 @@
+   type LatticeProjectDocumentType,
+   type LatticeMindMapArgs,
+   type LatticeExperimentArgs,
++  type LatticeFormulationArgs,
+ } from "./Services/LatticeProjectDocumentBroker.ts";
+ import { mcpToolResultError, mcpToolResultJson } from "./protocol.ts";
+ import {
+@@ -132,6 +133,39 @@
+     );
+   }
+   return { operation: "experiment_write", input };
++}
++
++function parseFormulationArgs(
++  args: Record<string, unknown>,
++  operation: LatticeFormulationArgs["operation"],
++): LatticeFormulationArgs {
++  const { revision, input } = args;
++  const keys = Object.keys(args);
++  if (operation === "formulation_validate" && !keys.length) return { operation };
++  if (operation === "formulation_read") {
++    if (!keys.length) return { operation };
++    if (
++      keys.length === 1 &&
++      typeof revision === "number" &&
++      Number.isSafeInteger(revision) &&
++      revision > 0
++    ) {
++      return { operation, revision };
++    }
++  }
++  if (
++    operation === "formulation_write" &&
++    keys.length === 1 &&
++    isRecord(input) &&
++    (input.operation === "revise" ||
++      input.operation === "challenge" ||
++      input.operation === "request_review") &&
++    Buffer.byteLength(JSON.stringify(input)) <= 80_000
++  )
++    return { operation, input };
++  throw new ProjectDocumentInputError(
++    "Supply a revision, challenge, or review request as described by the tool. Approval is available in the Lattice panel.",
++  );
+ }
+ 
+ export const makeLatticeProjectDocumentTools = (options: {
+@@ -297,9 +331,75 @@
+           ),
+       }),
+     );
++    const formulationTools = (
++      ["formulation_read", "formulation_validate", "formulation_write"] as const
++    ).map((operation): ToolEntry => {
++      const write = operation === "formulation_write";
++      return {
++        requiredCapability: write ? "thread:write" : "thread:read",
++        requiresActiveTurn: true,
++        definition: {
++          name: operation,
++          description: write
++            ? "Create or revise the active project's formulation with input.operation=revise, revision (0 to create, otherwise current revision), reason and a fields patch. Field keys: objective, scope, constraints, resources, currentSystem, priorWork, facts, assumptions, hypotheses, unknowns, blockers, sources (project paths or HTTPS URLs, one per line), benchmark, baseline, metrics, correctness, successCriteria. To challenge, supply operation=challenge, revision and text. To ask for human approval, supply operation=request_review and revision. A revision never changes a frozen snapshot."
++            : operation === "formulation_read"
++              ? "Read the current project problem formulation, latest approved version and history. Optionally supply a revision number to read a historical snapshot."
++              : "Check the latest formulation for missing fields, recorded blockers and unresolved challenges. This is a completeness check. Investigate contradictions and record them before requesting review.",
++          inputSchema: {
++            type: "object",
++            properties: write
++              ? {
++                  input: {
++                    type: "object",
++                    properties: {
++                      operation: {
++                        type: "string",
++                        enum: ["revise", "challenge", "request_review"],
++                      },
++                      revision: { type: "integer", minimum: 0 },
++                      fields: { type: "object", additionalProperties: { type: "string" } },
++                      reason: { type: "string" },
++                      text: { type: "string" },
++                    },
++                    required: ["operation", "revision"],
++                    additionalProperties: false,
++                  },
++                }
++              : operation === "formulation_read"
++                ? { revision: { type: "integer", minimum: 1 } }
++                : {},
++            required: write ? ["input"] : [],
++            additionalProperties: false,
++          },
++          annotations: write
++            ? { ...WRITE_TOOL_ANNOTATIONS, destructiveHint: false }
++            : READ_ONLY_TOOL_ANNOTATIONS,
++        },
++        handler: (args, context) =>
++          Effect.gen(function* () {
++            const parsed = yield* Effect.try({
++              try: () => parseFormulationArgs(args, operation),
++              catch: (error) => error,
++            });
++            const root = yield* options.resolveWorkspaceRoot(context);
++            if (!root)
++              return yield* Effect.fail(
++                new LatticeProjectDocumentBrokerError(
++                  "formulation_workspace_unavailable",
++                  "The caller task has no Lattice workspace.",
++                ),
++              );
++            return yield* broker.invoke(root, parsed);
++          }).pipe(
++            Effect.map(mcpToolResultJson),
++            Effect.catch((error) => Effect.succeed(errorResult(error))),
++          ),
++      };
++    });
+     return [
+       createProjectDocument,
+       ...mindMapTools,
+       ...experimentTools,
++      ...formulationTools,
+     ] satisfies ReadonlyArray<ToolEntry>;
+   });
+--- a/apps/web/src/latticeProjectDocumentRelay.ts
++++ b/apps/web/src/latticeProjectDocumentRelay.ts
+@@ -5,6 +5,8 @@
+ const MIND_MAP_REQUEST = "synara:mind-map-tool-request";
+ const EXPERIMENT_REQUEST = "synara:experiment-tool-request";
+ const EXPERIMENT_RESULT = "lattice:experiment-tool-result";
++const FORMULATION_REQUEST = "synara:formulation-tool-request";
++const FORMULATION_RESULT = "lattice:formulation-tool-result";
+ const MIND_MAP_RESULT = "lattice:mind-map-tool-result";
+ const RESULT_PATH = "/api/lattice/project-document-tools/result";
+ const HOST_TIMEOUT_MS = 30_000;
+@@ -20,7 +22,16 @@
+ type MindMapRequest = {
+   readonly id: string;
+   readonly args: Record<string, unknown> & {
+-    operation: "read" | "add" | "rename" | "delete" | "experiment_read" | "experiment_write";
++    operation:
++      | "read"
++      | "add"
++      | "rename"
++      | "delete"
++      | "experiment_read"
++      | "experiment_write"
++      | "formulation_read"
++      | "formulation_write"
++      | "formulation_validate";
+   };
+   readonly expiresAt: number;
+   readonly workspaceRoot: string;
+@@ -98,6 +109,21 @@
+   )
+     return null;
+   const { operation, nodeId, label } = value.args;
++  if (
++    (operation === "formulation_validate" && hasOnlyKeys(value.args, ["operation"])) ||
++    (operation === "formulation_read" &&
++      hasOnlyKeys(value.args, ["operation", "revision"]) &&
++      (value.args.revision === undefined ||
++        (typeof value.args.revision === "number" &&
++          Number.isSafeInteger(value.args.revision) &&
++          value.args.revision > 0))) ||
++    (operation === "formulation_write" &&
++      hasOnlyKeys(value.args, ["operation", "input"]) &&
++      isRecord(value.args.input) &&
++      new TextEncoder().encode(JSON.stringify(value.args.input)).byteLength <= 80_000)
++  ) {
++    return { ...value, workspaceRoot } as MindMapRequest;
++  }
+   if (
+     operation === "experiment_read" &&
+     hasOnlyKeys(value.args, ["operation", "id"]) &&
+@@ -210,6 +236,22 @@
+ ): Promise<RelayResult> {
+   const projectTool = "workspaceRoot" in request;
+   const experiment = projectTool && request.args.operation.startsWith("experiment_");
++  const formulation = projectTool && request.args.operation.startsWith("formulation_");
++  const requestType = formulation
++    ? FORMULATION_REQUEST
++    : experiment
++      ? EXPERIMENT_REQUEST
++      : projectTool
++        ? MIND_MAP_REQUEST
++        : SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST;
++  const resultType = formulation
++    ? FORMULATION_RESULT
++    : experiment
++      ? EXPERIMENT_RESULT
++      : projectTool
++        ? MIND_MAP_RESULT
++        : LATTICE_PROJECT_DOCUMENT_TOOL_RESULT;
++  const resultKind = formulation ? "formulation" : experiment ? "experiments" : "mind_map";
+   return new Promise((resolve) => {
+     let settled = false;
+     const finish = (result: RelayResult) => {
+@@ -224,24 +266,11 @@
+         return;
+       }
+       const data = event.data;
+-      if (
+-        data.type !==
+-          (experiment
+-            ? EXPERIMENT_RESULT
+-            : projectTool
+-              ? MIND_MAP_RESULT
+-              : LATTICE_PROJECT_DOCUMENT_TOOL_RESULT) ||
+-        data.version !== 1 ||
+-        data.id !== request.id
+-      ) {
++      if (data.type !== resultType || data.version !== 1 || data.id !== request.id) {
+         return;
+       }
+       if (!projectTool) finish(parseHostResult(data, request));
+-      else if (
+-        data.ok === true &&
+-        isRecord(data.result) &&
+-        data.result.kind === (experiment ? "experiments" : "mind_map")
+-      ) {
++      else if (data.ok === true && isRecord(data.result) && data.result.kind === resultKind) {
+         finish({ ok: true, result: data.result });
+       } else if (
+         data.ok === false &&
+@@ -254,8 +283,8 @@
+         finish(
+           invalidHostResult(
+             request.id,
+-            "mind_map_host_invalid_result",
+-            "The Mind Map host returned an invalid result.",
++            "project_tool_host_invalid_result",
++            "The Lattice project tool returned an invalid result.",
+           ),
+         );
+       }
+@@ -274,11 +303,7 @@
+     window.addEventListener("message", onMessage);
+     window.parent.postMessage(
+       {
+-        type: experiment
+-          ? EXPERIMENT_REQUEST
+-          : projectTool
+-            ? MIND_MAP_REQUEST
+-            : SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST,
++        type: requestType,
+         ...(projectTool ? { workspaceRoot: request.workspaceRoot } : {}),
+         version: 1,
+         id: request.id,

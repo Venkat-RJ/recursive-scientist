@@ -88,6 +88,9 @@ export const isProjectAssetFilePath = hasExtension("png", "jpg", "jpeg", "pdf", 
 export const isHtmlFilePath = hasExtension("html");
 /** A BibTeX bibliography, which has a visual form (the reference list) beside its source. */
 export const isBibFilePath = hasExtension("bib");
+export const isScientificResearchProject = (venue?: string) =>
+  venue === "scientific-research" || venue === "scheduling-optimization";
+
 export const isPreviewableSourceFilePath = hasExtension("tex", "md", "html");
 export const isHarperProseFilePath = hasExtension("tex", "md", "txt");
 

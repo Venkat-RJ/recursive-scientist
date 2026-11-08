@@ -1,3 +1,10 @@
+import { receiveAgentWebSearch, rejectAgentWebSearch } from "../agent/agent-web-search";
+import { executeAgentPanelRequest, parseAgentPanelRequest, type SetResearchPanel } from "../agent/agent-panel-tools";
+import { executeAgentKnowledgeRequest, parseAgentKnowledgeRequest } from "../agent/agent-prior-knowledge";
+import { executeAgentFormulationRequest, parseAgentFormulationRequest } from "../agent/agent-formulation-tools";
+import { executeAgentExperimentRequest, parseAgentExperimentRequest } from "../agent/agent-experiment-tools";
+import { executeAgentMindMapRequest, parseAgentMindMapRequest } from "../agent/agent-mind-map-tools";
+import { parseAgentTerminalUpdate, type AgentTerminalUpdate } from "../terminal/agent-terminal-update";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -85,6 +92,8 @@ type SynaraHostBridge = {
   onHistorySnapshot: (snapshot: NonNullable<ReturnType<typeof parseAgentProjectHistorySnapshot>>) => void;
   /** The narrowest the agent frame can be with its composer intact, in CSS px. */
   onMinimumWidth: (width: number) => void;
+  setResearchPanel: SetResearchPanel;
+  onAgentTerminal: (update: AgentTerminalUpdate) => void;
 };
 
 type MessageData = Record<string, unknown> & { type?: unknown };
@@ -102,6 +111,26 @@ const TOOL_ROUTES: Array<(
       if (response.ok && request.params.dryRun !== true && request.action !== "remove_reference") announceBibliographyWrite(request.workspaceRoot);
       return response;
     });
+  },
+  (data, _bridge, _projectRoot, currentProjectRoot) => {
+    const request = parseAgentKnowledgeRequest(data);
+    return request && executeAgentKnowledgeRequest(request, currentProjectRoot);
+  },
+  (data, _bridge, _projectRoot, currentProjectRoot) => {
+    const request = parseAgentFormulationRequest(data);
+    return request && executeAgentFormulationRequest(request, currentProjectRoot);
+  },
+  (data, _bridge, _projectRoot, currentProjectRoot) => {
+    const request = parseAgentExperimentRequest(data);
+    return request && executeAgentExperimentRequest(request, currentProjectRoot);
+  },
+  (data, bridge, _projectRoot, currentProjectRoot) => {
+    const request = parseAgentPanelRequest(data);
+    return request && executeAgentPanelRequest(request, currentProjectRoot, bridge.setResearchPanel);
+  },
+  (data, _bridge, projectRoot) => {
+    const request = parseAgentMindMapRequest(data);
+    return request && executeAgentMindMapRequest(request, projectRoot);
   },
   (data, bridge) => {
     const request = parseAgentProjectDocumentToolRequest(data);
@@ -384,8 +413,11 @@ export function useSynaraHost({ project, projectRef, agentVisible, bridge, appea
           host.bridge.annotationTools(),
         ).then(postMessage);
       },
+      "synara:web-search-result": (data) => receiveAgentWebSearch(data, projectRootRef.current),
       [SYNARA_COMPOSER_PROMPT_RESULT]: (data) => {
-        const error = parseAgentComposerPromptResult(data)?.error;
+        const result = parseAgentComposerPromptResult(data);
+        if (result) rejectAgentWebSearch(result, projectRootRef.current);
+        const error = result?.error;
         // The panel leaves a send it refuses in its composer as a draft. Every
         // other refusal is a stale or malformed request, nothing to act on.
         if (error?.code === "no-provider") {
@@ -395,6 +427,10 @@ export function useSynaraHost({ project, projectRef, agentVisible, bridge, appea
         } else if (error?.code === "send-failed") {
           showError(i18n._(msg`The agent could not send the request. It is waiting in the agent's composer.`), i18n._(msg`Agent`));
         }
+      },
+      "synara:agent-terminal": (data, host) => {
+        const update = parseAgentTerminalUpdate(data);
+        if (update && update.workspaceRoot === projectRootRef.current) host.bridge.onAgentTerminal(update);
       },
       [SYNARA_TURN_ACTIVITY]: (data, host) => {
         const activity = parseAgentTurnActivity(data);

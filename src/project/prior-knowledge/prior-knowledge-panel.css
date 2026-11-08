@@ -1,0 +1,25 @@
+.knowledge-index, .knowledge-detail, .knowledge-form, .knowledge-related {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.knowledge-detail { border-top: 1px solid var(--border-subtle); padding-block-start: var(--space-6); }
+.knowledge-detail > p:not(.research-meta) { white-space: pre-wrap; }
+.knowledge-detail dd { white-space: pre-wrap; }
+.knowledge-detail dl, .knowledge-sources ul { display: grid; gap: var(--space-4); }
+.knowledge-detail label, .knowledge-form label { display: grid; gap: var(--space-2); min-width: 0; }
+.knowledge-form-pair { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.knowledge-form-pair > * { flex: 1 1 10rem; min-width: 0; }
+.knowledge-list { max-block-size: 9.5rem; overflow: auto; }
+.knowledge-list button small { font-weight: var(--weight-regular); }
+.knowledge-content .knowledge-link { justify-content: flex-start; text-align: start; }
+.knowledge-evidence { display: grid; gap: var(--space-4); margin: 0; padding-inline-start: var(--space-8); }
+.knowledge-sources ul { margin: 0; padding: 0; list-style: none; }
+.knowledge-sources small { display: block; padding-inline: var(--space-4); }
+.knowledge-muted { color: var(--text-secondary); font-size: var(--type-caption-size); }
+.knowledge-form .research-disclosure-body > button { justify-self: start; }
+
+@container research-panel (min-width: 640px) {
+  .knowledge-list { max-block-size: 23rem; }
+  .knowledge-detail { border-top: 0; padding-block-start: 0; }
+}

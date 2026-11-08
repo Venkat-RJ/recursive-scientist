@@ -33,6 +33,7 @@ mod create;
 mod editor_save;
 mod entries;
 mod history;
+pub(crate) use history::{read_prior_knowledge, write_prior_knowledge};
 mod imports;
 mod index_sources;
 mod linked_bibliography;

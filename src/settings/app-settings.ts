@@ -190,7 +190,7 @@ export const markTutorialSeen = () => persistSetting(TUTORIAL_SEEN_KEY, "1");
 
 
 const SETTINGS_TABS: readonly SettingsTab[] = [
-  "appearance", "editor", "agent", "mcp", "usage", "environment", "overleaf", "literature", "api", "doctor", "logs", "acknowledgements",
+  "appearance", "editor", "agent", "agent-behavior", "mcp", "usage", "environment", "overleaf", "literature", "api", "doctor", "logs", "acknowledgements",
 ];
 
 /** Settings reopens on the page it was last left on. */
@@ -199,7 +199,7 @@ export const persistSettingsTab = (tab: SettingsTab) => persistSetting(SETTINGS_
 
 /** The pages that configure the agent, which need its runtime started. */
 export function isSynaraSettingsTab(tab: SettingsTab): boolean {
-  return tab === "agent" || tab === "mcp" || tab === "api" || tab === "usage";
+  return tab === "agent" || tab === "agent-behavior" || tab === "mcp" || tab === "api" || tab === "usage";
 }
 
 export const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";

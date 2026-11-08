@@ -99,7 +99,7 @@ describe("documents and editors", () => {
       await nextFrames(3);
     });
     await waitForSelectedTab("notes.md");
-    expect(paneContent("primary")).toHaveTextContent("content:notes.md");
+    expect(await screen.findByRole("textbox", { name: "Markdown document editor" })).toHaveTextContent("content:notes.md");
     expect(invokeCalls(reader)).toHaveLength(0);
   });
 

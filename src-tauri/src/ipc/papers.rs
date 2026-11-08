@@ -21,6 +21,13 @@ fn emit_paper_progress(app: &AppHandle, window_label: &str, stage: &str) {
 }
 
 #[tauri::command]
+pub async fn search_web(
+    state: State<'_, AppState>, window: Window, query: String,
+) -> Result<Vec<crate::firecrawl::WebHit>, String> {
+    in_project(&state, &window, "Web search", move |_| crate::firecrawl::search_web(&query)).await
+}
+
+#[tauri::command]
 pub async fn search_literature(
     query: String, precise: Option<bool>, page: Option<u32>,
 ) -> Result<LiteraturePage, String> {

@@ -1434,6 +1434,16 @@ describe("project tree and projects", () => {
     expect(document.querySelector('iframe[title="Agent"]')).toHaveAttribute("src", expect.stringContaining("127.0.0.1:4173"));
     expect(screen.queryByPlaceholderText(/ask the agent/i)).not.toBeInTheDocument();
   });
+  it("opens Prior Knowledge from Panels in the Trellis workspace", async () => {
+    renderApp({ ...projectCommands(), read_prior_knowledge: null });
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Panels" }), { button: 0, pointerType: "mouse" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Prior Knowledge" }));
+    const panel = await screen.findByRole("complementary", { name: "Prior Knowledge" });
+    expect(await within(panel).findByRole("button", { name: "Add finding" })).toBeInTheDocument();
+    expect(panel.closest('[data-trellis-part="surface"][data-type="prior-knowledge"]')).not.toBeNull();
+    await expectInvoked("read_prior_knowledge", { projectRoot: ROOT });
+  });
+
   describe("open in browser", () => {
     const openProject = (commands = {}) => renderApp({
       ...projectCommands(projectSnapshot({ files: [] })), open_in_browser: null, return_to_desktop: null, ...commands,
@@ -2018,7 +2028,7 @@ describe("project tree and projects", () => {
       ...projectCommands(notes, "# Private draft"), create_project: { ...notes, root: "/tmp/new-paper" },
       open_project_window: () => ({ label: "project-1", focusedExisting: false }),
     });
-    await expectEditorText("# Private draft");
+    expect(await screen.findByRole("heading", { name: "Private draft" })).toBeInTheDocument();
 
     vi.mocked(open).mockResolvedValue(chosenFolder);
     await chooseProjectMenuItem(menuItem);
@@ -2031,7 +2041,7 @@ describe("project tree and projects", () => {
     // The point of the feature: this window keeps the project and the buffer it
     // already had, rather than being taken over by the one just opened.
     expect(invoke).not.toHaveBeenCalledWith("open_project", { path });
-    expect(editorViewAt().state.doc.toString()).toBe("# Private draft");
+    expect(screen.getByRole("heading", { name: "Private draft" })).toBeInTheDocument();
   });
 
   it("does not carry an open Markdown buffer into the next project", async () => {
@@ -2054,6 +2064,8 @@ describe("project tree and projects", () => {
       list_papers: () => currentRoot === overleafSnapshot.root ? incomingPapers.promise : [],
       write_project_file: undefined,
     });
+    await screen.findByRole("heading", { name: "Private draft" });
+    selectDocumentView("Edit");
     const initialEditor = await expectEditorText("# Private draft");
     const insertedText = "\nLocal only.";
     const savedCursor = initialEditor.state.doc.length + insertedText.length;

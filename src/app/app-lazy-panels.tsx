@@ -22,3 +22,5 @@ export const TrellisAgentSurface = lazy(() => (import.meta.env.LATTICE_WEB_DEMO
 export const CompileDiagnosticsPanel = lazy(() =>
   import("../build/compile-diagnostics-panel").then((module) => ({ default: module.CompileDiagnosticsPanel })),
 );
+
+export const WebKnowledge = lazy(() => import("../project/web-knowledge").then((module) => ({ default: module.WebKnowledgePanel })));

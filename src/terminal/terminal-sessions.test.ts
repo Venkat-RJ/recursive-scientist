@@ -73,6 +73,66 @@ describe("terminal sessions", () => {
     expect(calls.at(-1)).toBe('write 7 "x"');
   });
 
+  it("streams agent output in its own tab without writing to the user's shell", async () => {
+    const { sessions, opened, calls } = setup();
+    const shell = sessions.open()!;
+    opened[0].resolve(7);
+    await settle();
+
+    const update = {
+      workspaceRoot: "/projects/thesis", id: "command-1", command: "printf lines",
+      output: "", status: "running" as const, exitCode: null, truncated: false,
+    };
+    expect(sessions.reportAgentCommand({ ...update, workspaceRoot: "/other" })).toBe(false);
+    expect(sessions.reportAgentCommand(update)).toBe(false);
+    expect(sessions.get().sessions).toHaveLength(1);
+    expect(sessions.reportAgentCommand({ ...update, reveal: true })).toBe(true);
+    const agent = sessions.get().sessions[1];
+    expect(agent.agent).toBe(true);
+    expect(sessions.get().active).toBe(agent.key);
+    const notes = vi.spyOn(agent.screen, "note");
+    const writes = vi.spyOn(agent.screen, "write");
+    agent.screen.type("never sent");
+    sessions.select(shell.key);
+
+    sessions.reportAgentCommand({ ...update, output: "first\n" });
+    sessions.reportAgentCommand({ ...update, output: "first\n" });
+    sessions.reportAgentCommand({ ...update, output: "first\nsecond\x1b[2J\n", status: "completed", exitCode: 0 });
+    expect(writes.mock.calls.map(([bytes]) => new TextDecoder().decode(bytes))).toEqual(["first\r\n", "second\r\n"]);
+    expect(notes).toHaveBeenCalledWith("[completed, exit code 0]");
+    expect(sessions.get().active).toBe(shell.key);
+    sessions.close(agent.key);
+    expect(sessions.reportAgentCommand({ ...update, status: "completed" })).toBe(false);
+    expect(opened).toHaveLength(1);
+    expect(calls).toEqual(["resize 7 80x24"]);
+  });
+
+  it("reopens the exact execution among identical and overlapping commands", () => {
+    const { sessions, opened } = setup();
+    const command = {
+      workspaceRoot: "/projects/thesis", id: "first", command: "printf lines",
+      output: "first line", status: "running" as const, exitCode: null, truncated: false,
+    };
+    sessions.reportAgentCommand(command);
+    sessions.reportAgentCommand({ ...command, id: "second", output: "second line" });
+    expect(sessions.revealAgentExecution("first")).toBe(true);
+    const tab = sessions.get().sessions[0];
+    const writes = vi.spyOn(tab.screen, "write");
+    sessions.reportAgentCommand({ ...command, id: "second", output: "second line, later", status: "failed", exitCode: 3 });
+    expect(writes).not.toHaveBeenCalled();
+    expect(sessions.get().executionId).toBe("first");
+    sessions.close(tab.key);
+    sessions.reportAgentCommand({ ...command, output: "first line, later", status: "completed", exitCode: 0 });
+    expect(sessions.get().sessions).toHaveLength(0);
+    expect(sessions.revealAgentExecution("second")).toBe(true);
+    expect(sessions.get().executionId).toBe("second");
+    expect(sessions.get().executions.find(({ id }) => id === "second")?.exitCode).toBe(3);
+    sessions.setProject("/elsewhere");
+    expect(sessions.get().executions).toEqual([]);
+    expect(sessions.revealAgentExecution("second")).toBe(false);
+    expect(opened).toHaveLength(0);
+  });
+
   it("starts nothing without a project", () => {
     const { sessions, opened } = setup("");
     expect(sessions.open()).toBeNull();

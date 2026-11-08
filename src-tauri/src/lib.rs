@@ -8,6 +8,7 @@
 //! their own; the behaviour behind them lives in the domain modules below.
 
 mod agent_literature;
+mod web_knowledge;
 mod alphaxiv;
 mod app_identity;
 mod app_restart;
@@ -449,6 +450,11 @@ pub fn run() {
             ipc::files::find_moved_project_file,
             ipc::files::read_project_file,
             ipc::files::write_project_file,
+            ipc::files::list_web_sources,
+            ipc::files::read_web_source,
+            ipc::files::save_web_source,
+            ipc::files::read_prior_knowledge,
+            ipc::files::write_prior_knowledge,
             ipc::files::create_project_entry,
             ipc::files::create_open_slide_deck,
             ipc::files::delete_project_entry,
@@ -500,6 +506,7 @@ pub fn run() {
             ipc::bibliography::bibliography_audit_entry,
             ipc::bibliography::bibliography_audit_apply,
             ipc::papers::search_literature,
+            ipc::papers::search_web,
             ipc::papers::import_reference,
             ipc::papers::cancel_reference_import,
             ipc::papers::fetch_paper,

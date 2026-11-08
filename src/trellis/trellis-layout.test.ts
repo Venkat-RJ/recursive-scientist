@@ -398,6 +398,16 @@ describe("named workspaces", () => {
     expect(new WorkspaceLibrary().list()).toEqual(library.list());
   });
 
+  it("starts a research notebook without a PDF and keeps saved layouts", () => {
+    const library = new WorkspaceLibrary();
+    const research = openProjectLayout("/new-research", library, true).document;
+    expect(Object.values(research.views).map((view) => view.type).sort()).toEqual(["agent", "papers", "project", "slot"]);
+    expect(Object.values(openProjectLayout("/new-paper", library).document.views).some((view) => view.type === "pdf")).toBe(true);
+    const saved = workspaceWith(["main.md"]);
+    saveLayout("/existing-research", { document: saved, workspace: library.recent() });
+    expect(openProjectLayout("/existing-research", library, true).document).toEqual(saved);
+  });
+
   it("opens a project as it was left, whatever its workspace saved since", () => {
     const library = new WorkspaceLibrary();
     const id = library.recent();

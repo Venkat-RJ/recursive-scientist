@@ -1,0 +1,421 @@
+{
+  "version": 1,
+  "events": [
+    {
+      "at": "2026-11-07T19:20:18.666Z",
+      "actor": "agent",
+      "changes": [
+        {
+          "source": {
+            "id": "project-rules",
+            "title": "Scheduling Optimization reference rules",
+            "kind": "project",
+            "location": "baseline.py"
+          }
+        },
+        {
+          "source": {
+            "id": "project-evaluator",
+            "title": "Scheduling Optimization evaluator",
+            "kind": "project",
+            "location": "evaluator.py"
+          }
+        },
+        {
+          "source": {
+            "id": "project-data",
+            "title": "Scheduling Optimization data provenance",
+            "kind": "project",
+            "location": "DATA_SOURCES.md"
+          }
+        },
+        {
+          "source": {
+            "id": "martins-2026",
+            "title": "Martins, Valente and Schaller (2026): dispatching rules",
+            "kind": "paper",
+            "location": "https://onlinelibrary.wiley.com/doi/10.1111/itor.70146"
+          }
+        },
+        {
+          "source": {
+            "id": "martins-instances",
+            "title": "Martins et al. author dataset",
+            "kind": "dataset",
+            "location": "https://github.com/jorge-valente/single-machine-total-weighted-tardiness-instances"
+          }
+        },
+        {
+          "source": {
+            "id": "valente-atc",
+            "title": "Valente (2007): workload-aware apparent tardiness cost",
+            "kind": "paper",
+            "location": "https://repositorio.inesctec.pt/server/api/core/bitstreams/331dcaac-7530-40e4-aaca-bae45ae21408/content"
+          }
+        },
+        {
+          "source": {
+            "id": "congram-dynasearch",
+            "title": "Congram, Potts and van de Velde (2002): iterated dynasearch",
+            "kind": "paper",
+            "location": "https://www.imada.sdu.dk/~marco/Teaching/Fall2007/DM87/Files/Congram2002.pdf"
+          }
+        },
+        {
+          "source": {
+            "id": "or-library",
+            "title": "Beasley OR-Library weighted tardiness benchmarks",
+            "kind": "benchmark",
+            "location": "https://people.brunel.ac.uk/~mastjjb/jeb/orlib/wtinfo.html"
+          }
+        },
+        {
+          "source": {
+            "id": "tanaka-sips",
+            "title": "Tanaka: SiPS exact solver C source",
+            "kind": "implementation",
+            "location": "https://sites.google.com/site/shunjitanaka/sips"
+          }
+        },
+        {
+          "source": {
+            "id": "tanaka-results",
+            "title": "Tanaka: SiPS benchmark results and optimal values",
+            "kind": "benchmark",
+            "location": "https://sites.google.com/site/shunjitanaka/sips/benchmark-results-sips"
+          }
+        },
+        {
+          "source": {
+            "id": "cicirello-setups",
+            "title": "Cicirello: weighted tardiness with sequence-dependent setups",
+            "kind": "benchmark",
+            "location": "https://www.cicirello.org/datasets/wtsds/"
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-target",
+            "title": "The pinned Scheduling Optimization protocol",
+            "kind": "assumption",
+            "status": "reported",
+            "statement": "The target is setup-free total weighted tardiness on one machine. The template uses a 250-instance training split and a 2,500-instance held-out test split, both with 50 jobs per instance. Demo fixtures and prior Fork Scientist generated inputs are separate.",
+            "evidence": [
+              {
+                "sourceId": "project-data",
+                "locator": "Published instances and Synthetic demo",
+                "note": "Documents the pinned revision, split sizes, fixture provenance and separation from previous Fork Scientist results."
+              },
+              {
+                "sourceId": "martins-instances",
+                "locator": "README and archive listing",
+                "note": "The authors publish separate training and test archives."
+              },
+              {
+                "sourceId": "project-evaluator",
+                "locator": "evaluate(), main()",
+                "note": "The evaluator reports validity and lower-is-better cost and applies a 30-second whole-batch candidate default."
+              }
+            ],
+            "links": []
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-edd-wspt",
+            "title": "EDD and WSPT: local reference rules",
+            "kind": "method",
+            "status": "reported",
+            "statement": "Use the template rules for a sanity check and continuity with prior local results.",
+            "evidence": [
+              {
+                "sourceId": "project-rules",
+                "locator": "L13–24",
+                "note": "Confirms EDD uses due-date order and WSPT orders by processing time divided by weight."
+              },
+              {
+                "sourceId": "project-evaluator",
+                "locator": "evaluate() comparator selection",
+                "note": "Uses the lower aggregate on the training split for the published test comparison. EDD wins a tie."
+              },
+              {
+                "sourceId": "valente-atc",
+                "locator": "Section 2, pp. 564–565",
+                "note": "Describes the all-tardy special case for WSPT."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-target",
+                "revision": 1,
+                "relation": "builds_on"
+              }
+            ],
+            "method": {
+              "mechanism": "Sort by due date or processing-time/weight, with job ID as tie-breaker.",
+              "assumptions": "A valid single-machine permutation; the objective is total weighted tardiness.",
+              "protocol": "Both built-in rules score on identical evaluator inputs. Use the pinned training split for comparator selection.",
+              "outcome": "The template ships these reference implementations. This evidence record contains no matched new benchmark scores.",
+              "limitations": "Neither baseline combines current slack and weight per unit time. WSPT has a special-case guarantee when all jobs are tardy (see Valente, Section 2)."
+            }
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-backward",
+            "title": "Martins et al. backward dispatch: same benchmark family",
+            "kind": "method",
+            "status": "reported",
+            "statement": "The benchmark authors report that one of their new backward dispatch rules delivered the best solution quality in their computational comparison and belongs to the quality-time Pareto set.",
+            "evidence": [
+              {
+                "sourceId": "martins-2026",
+                "locator": "Abstract and data availability statement",
+                "note": "Supports the reported quality ranking within the dispatch-rule study and links the author datasets."
+              },
+              {
+                "sourceId": "martins-instances",
+                "locator": "Repository README and archive listing",
+                "note": "The public author repository listing provides the data archives. Solver source was not located in the listing reviewed."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-target",
+                "revision": 1,
+                "relation": "builds_on"
+              }
+            ],
+            "method": {
+              "mechanism": "A backward construction rule from the paper; exact priority formula and variant await full-text inspection.",
+              "assumptions": "Setup-free single-machine weighted tardiness. Parameter selection depends on instance characteristics in the authors' reported preliminary tests.",
+              "protocol": "The authors compared dispatch rules coded in the same language, with preliminary tuning followed by a comparison of solution quality and runtime.",
+              "outcome": "The abstract identifies one proposed backward rule as the highest-quality rule in their comparison.",
+              "limitations": "Abstract-level evidence. Exact variant, test subset, scores, time allowance and implementation remain to be established before reproduction."
+            }
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-atc",
+            "title": "Workload-aware ATC: fast constructive baseline",
+            "kind": "method",
+            "status": "reported",
+            "statement": "Apparent tardiness cost combines weight per processing time with an exponential penalty for positive slack. Valente reports that workload-adapted lookahead improves on a fixed lookahead across a broad range of its test instances.",
+            "evidence": [
+              {
+                "sourceId": "valente-atc",
+                "locator": "Sections 2–5, pp. 564–572",
+                "note": "Defines ATC and its lookahead. Gives the mapping and workload-adaptive variants and evaluates them against fixed lookahead."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-target",
+                "revision": 1,
+                "relation": "builds_on"
+              }
+            ],
+            "method": {
+              "mechanism": "Select the highest w/p times exp(-max(slack,0)/(k × mean remaining processing time)); derive k from instance or remaining workload features.",
+              "assumptions": "The jobs are initially available on one machine. Parameters use workload and due-date information available to the dispatcher.",
+              "protocol": "Published ATC variants were tested on generated problems in the 2007 study. Implement from Sections 2–4 and freeze any calibration on the local training split.",
+              "outcome": "Reported improvement over fixed lookahead varies with the test conditions.",
+              "limitations": "Paper results are from separate generated instances. Relative rank on the Martins 50-job split is unknown."
+            }
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-dynasearch",
+            "title": "Iterated dynasearch: stronger local-search baseline",
+            "kind": "method",
+            "status": "reported",
+            "statement": "Dynamic programming chooses a combination of swaps on nonoverlapping position intervals. Iterated descents restart from small perturbations of earlier local minima.",
+            "evidence": [
+              {
+                "sourceId": "congram-dynasearch",
+                "locator": "Sections 2–5, especially the swap example and Tables 3 onward",
+                "note": "Defines independent swaps, the neighborhood and its recurrence. The authors report better descent performance in their tests and describe cases where the richer neighborhood need not win."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-target",
+                "revision": 1,
+                "relation": "builds_on"
+              }
+            ],
+            "method": {
+              "mechanism": "Use a dynamic program over the current sequence to combine compatible moves, then perturb and descend again.",
+              "assumptions": "Independent move intervals retain their aggregate processing durations; no sequence-dependent setup times.",
+              "protocol": "The 2002 study compares variants and traditional descents on its own scheduling test protocol. Implement from the recurrence and match the new local budget explicitly.",
+              "outcome": "Authors report gains over conventional single-move descents on their tested cases.",
+              "limitations": "The richer neighborhood has a computation cost and can reach a worse local minimum on some instances. No matched results on the pinned Martins split."
+            }
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-sips",
+            "title": "SiPS: exact reference with downloadable source",
+            "kind": "method",
+            "status": "reported",
+            "statement": "SiPS is a source-available exact solver candidate for per-instance optima and gap checks. The author page lists Linux and Windows C source downloads.",
+            "evidence": [
+              {
+                "sourceId": "tanaka-sips",
+                "locator": "Description, TFA09 and Download",
+                "note": "States the scope, cites the exact no-idle algorithm and links source archives."
+              },
+              {
+                "sourceId": "tanaka-results",
+                "locator": "Benchmark instances and Benchmark results",
+                "note": "Provides optimal values and CPU times for an OR-Library-derived suite and extensions."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-target",
+                "revision": 1,
+                "relation": "builds_on"
+              }
+            ],
+            "method": {
+              "mechanism": "Use the no-idle successive sublimation dynamic programming solver as a reference oracle.",
+              "assumptions": "Single machine, no sequence-dependent setups or precedence; sum of completion-dependent costs.",
+              "protocol": "Published SiPS results use OR-Library and other author instances. Run on identical input bytes to use the values as reference optima here.",
+              "outcome": "The author distributes source and historical results; no local port or solution certificate was tested here.",
+              "limitations": "Confirm license and build first. Track exact-solver timeouts separately; do not compare historical CPU times with this machine."
+            }
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-unmatched",
+            "title": "Same objective does not establish a matched ranking",
+            "kind": "comparison",
+            "status": "interpretation",
+            "statement": "Keep the benchmark authors' backward rule and workload-aware ATC in the dispatch tier. Use iterated dynasearch for the bounded search tier and SiPS for optimum gaps when it solves. No paper score or runtime here establishes a matched ranking of these methods against each other on the pinned split.",
+            "evidence": [
+              {
+                "sourceId": "or-library",
+                "locator": "Weighted tardiness, instance generation and file layout",
+                "note": "Identifies a distinct dataset with 125 instances per 40, 50 and 100 jobs."
+              },
+              {
+                "sourceId": "project-data",
+                "locator": "Published instances",
+                "note": "The local benchmark and earlier generated experiments use distinct instances."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-edd-wspt",
+                "revision": 1,
+                "relation": "compares"
+              },
+              {
+                "id": "pk-backward",
+                "revision": 1,
+                "relation": "compares"
+              },
+              {
+                "id": "pk-atc",
+                "revision": 1,
+                "relation": "compares"
+              },
+              {
+                "id": "pk-dynasearch",
+                "revision": 1,
+                "relation": "compares"
+              },
+              {
+                "id": "pk-sips",
+                "revision": 1,
+                "relation": "compares"
+              }
+            ],
+            "comparability": "different"
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-setup-boundary",
+            "title": "Sequence-dependent setups are a transfer boundary",
+            "kind": "limitation",
+            "status": "reported",
+            "statement": "The Cicirello dataset models setup times that depend on the order of successive jobs. Its scores are not directly comparable with the setup-free project. Only transfer the ideas after re-deriving move costs and checking the protocol.",
+            "evidence": [
+              {
+                "sourceId": "cicirello-setups",
+                "locator": "Dataset description",
+                "note": "The generator varies setup severity as well as due-date tightness and range."
+              },
+              {
+                "sourceId": "or-library",
+                "locator": "Problem definition",
+                "note": "The setup-free completion time follows from job durations and processing order."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-target",
+                "revision": 1,
+                "relation": "builds_on"
+              }
+            ]
+          }
+        },
+        {
+          "finding": {
+            "id": "pk-budgeted-search",
+            "title": "Opportunity: use workload features to choose the search start",
+            "kind": "opportunity",
+            "status": "speculation",
+            "statement": "Test whether a frozen workload-based choice between a calibrated ATC start and a backward-dispatch start improves a fixed-budget dynasearch. Compare against ATC-only, the backward rule alone if reproduced, and identical dynasearch with a fixed start. Match CPU, seeds, evaluator, inputs and the total budget including dispatch. Falsify the idea if aggregate cost does not improve over the strongest matched control or any permutation fails validation. Tune on training only and defer the held-out run.",
+            "evidence": [
+              {
+                "sourceId": "valente-atc",
+                "locator": "Sections 3–5",
+                "note": "Shows why workload features are a plausible input to a dispatch choice."
+              },
+              {
+                "sourceId": "congram-dynasearch",
+                "locator": "Sections 2 and 5",
+                "note": "Motivates multiple starts and controls for the search procedure."
+              },
+              {
+                "sourceId": "martins-2026",
+                "locator": "Abstract",
+                "note": "Reports that instance characteristics mattered in choosing dispatch-rule parameters."
+              }
+            ],
+            "links": [
+              {
+                "id": "pk-atc",
+                "revision": 1,
+                "relation": "builds_on"
+              },
+              {
+                "id": "pk-backward",
+                "revision": 1,
+                "relation": "builds_on"
+              },
+              {
+                "id": "pk-dynasearch",
+                "revision": 1,
+                "relation": "builds_on"
+              },
+              {
+                "id": "pk-unmatched",
+                "revision": 1,
+                "relation": "builds_on"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -130,6 +130,8 @@ export function useTrellisBridge(app: TrellisBridgeApp) {
         if (kind === "papers") {
           return [
             { id: "discover", label: t`Discover literature`, run: () => tools.open("literature") },
+            { id: "web-knowledge", label: t`Knowledge from Web`, run: () => tools.open("web-knowledge") },
+            { id: "github-knowledge", label: t`Knowledge from GitHub`, run: () => tools.open("github-knowledge") },
             { id: "bib-entry", label: t`Add papers`, run: () => referenceImport.openAddSheet() },
             {
               id: "check-references", label: t`Check references`, run: () => {

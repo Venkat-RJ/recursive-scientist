@@ -5,7 +5,7 @@
  */
 import { Fragment, lazy, Suspense, useRef, type Dispatch, type SetStateAction } from "react";
 import { useLingui } from "@lingui/react/macro";
-import { BookMarked, BookOpen, ClipboardCheck, Plus, Search } from "lucide-react";
+import { BookMarked, BookOpen, ClipboardCheck, Globe, Plus, Search } from "lucide-react";
 import { Tip } from "../components/icon-tip";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -23,6 +23,7 @@ export type PanelActionsProps = {
   openAddPapers: (seed?: string) => void;
   onCheckReferences: () => void;
   onDiscoverLiterature: () => void;
+  onWebKnowledge: () => void;
   openProjectFind: () => void;
   setProjectSearchOpen: Dispatch<SetStateAction<boolean>>;
   requestNewEntry: (type: NewEntryType) => void;
@@ -34,6 +35,7 @@ export function PanelActions({ mode, synara, ...props }: PanelActionsProps) {
   // Icon-only buttons: Tip names each one after its label.
   const paperActions = [
     { icon: <BookOpen size={14} />, label: t`Discover literature`, run: props.onDiscoverLiterature },
+    { icon: <Globe size={14} />, label: t`Knowledge from Web`, run: props.onWebKnowledge },
     { icon: <BookMarked size={14} />, label: t`Add papers`, run: () => props.openAddPapers() },
     { icon: <ClipboardCheck size={14} aria-hidden="true" />, label: t`Check references`, run: props.onCheckReferences },
   ];

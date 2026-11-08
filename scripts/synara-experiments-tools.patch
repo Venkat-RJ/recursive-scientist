@@ -1,0 +1,315 @@
+--- a/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts
++++ b/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts
+@@ -28,7 +28,7 @@
+     string,
+     {
+       readonly workspaceRoot: string;
+-      readonly mindMap: boolean;
++      readonly resultKind: "mind_map" | "experiments" | undefined;
+       readonly resolve: (value: unknown) => void;
+       readonly reject: (error: LatticeProjectDocumentBrokerError) => void;
+       readonly timer: ReturnType<typeof setTimeout>;
+@@ -60,7 +60,12 @@
+         }, toolTimeoutMs);
+         pending.set(id, {
+           workspaceRoot,
+-          mindMap: "operation" in args,
++          resultKind:
++            "operation" in args
++              ? args.operation.startsWith("experiment_")
++                ? "experiments"
++                : "mind_map"
++              : undefined,
+           resolve: (value) => resume(Effect.succeed(value)),
+           reject: (error) => resume(Effect.fail(error)),
+           timer,
+@@ -78,12 +83,9 @@
+         if (!entry || entry.workspaceRoot !== workspaceRoot) return false;
+         if (result.ok) {
+           const value = result.result;
+-          const mindMap =
+-            value !== null &&
+-            typeof value === "object" &&
+-            "kind" in value &&
+-            value.kind === "mind_map";
+-          if (entry.mindMap !== mindMap) return false;
++          const kind =
++            value !== null && typeof value === "object" && "kind" in value ? value.kind : undefined;
++          if (entry.resultKind !== kind) return false;
+         }
+         pending.delete(id);
+         clearTimeout(entry.timer);
+--- a/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts
++++ b/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts
+@@ -8,6 +8,10 @@
+   | { readonly operation: "add" | "rename"; readonly nodeId: string; readonly label: string }
+   | { readonly operation: "delete"; readonly nodeId: string };
+ 
++export type LatticeExperimentArgs =
++  | { readonly operation: "experiment_read"; readonly id?: string }
++  | { readonly operation: "experiment_write"; readonly input: Record<string, unknown> };
++
+ export interface LatticeProjectDocumentRequest {
+   readonly id: string;
+   readonly args:
+@@ -15,7 +19,8 @@
+         readonly path: string;
+         readonly documentType: LatticeProjectDocumentType;
+       }
+-    | LatticeMindMapArgs;
++    | LatticeMindMapArgs
++    | LatticeExperimentArgs;
+   readonly expiresAt: number;
+ }
+ 
+--- a/apps/server/src/agentGateway/harnessPolicy.ts
++++ b/apps/server/src/agentGateway/harnessPolicy.ts
+@@ -50,6 +50,7 @@
+             "For two or more independent tasks, submit one exact create_tasks batch. The array length must equal the requested task count; do not replace a failed durable operation with extra tasks.",
+             "When delegated results are needed, call wait_for_tasks for every created task id and repeat it with the returned runIds until allTerminal is true, then synthesize all outcomes. Use send_message_to_task only for a scoped follow-up and interrupt_task only when work should stop.",
+             "Provider-native subagents may be used for internal parallel work. Lattice tasks are durable project conversations; use create_task or create_tasks when the user needs separately inspectable task history.",
++            "When the user works in Experiments, read existing records with experiments_read and use experiments_write to record plans, progress, evidence and findings. Link saved results and leave approval, rejection and verification to the user.",
+             "Use mind_map_read to inspect the active project Mind Map and mind_map_update to add, rename, or delete its nodes. Use the returned node IDs.",
+             "Use create_project_document to create and open a native Lattice board or spreadsheet. After it succeeds for a board, use create_canvas_shapes to populate the newly opened canvas; after it succeeds for a spreadsheet, use spreadsheet_batch_update to populate the new workbook. Never create either native format by writing its serialized file contents directly.",
+             "Use preview_presentation_page to look at an Open Slide page after creating or editing it; it renders the deck's files as they now stand on disk. Never say a page was visually checked unless that tool returned its image.",
+--- a/apps/server/src/agentGateway/hostProfile.ts
++++ b/apps/server/src/agentGateway/hostProfile.ts
+@@ -93,6 +93,8 @@
+   "create_project_document",
+   "mind_map_read",
+   "mind_map_update",
++  "experiments_read",
++  "experiments_write",
+   "read_editor_comments",
+   "preview_presentation_page",
+   "preview_latex_figure",
+--- a/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts
++++ b/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts
+@@ -34,6 +34,17 @@
+ }
+ 
+ function isSuccessResult(value: unknown): boolean {
++  if (isRecord(value) && value.kind === "experiments") {
++    return (
++      (hasOnlyKeys(value, ["kind", "experiment"]) &&
++        isRecord(value.experiment) &&
++        typeof value.experiment.id === "string") ||
++      (hasOnlyKeys(value, ["kind", "total", "experiments"]) &&
++        Number.isSafeInteger(value.total) &&
++        Array.isArray(value.experiments) &&
++        value.experiments.length <= 80)
++    );
++  }
+   if (isRecord(value) && value.kind === "mind_map") {
+     if (Array.isArray(value.nodes)) {
+       return (
+--- a/apps/server/src/agentGateway/latticeProjectDocumentTools.ts
++++ b/apps/server/src/agentGateway/latticeProjectDocumentTools.ts
+@@ -6,6 +6,7 @@
+   type LatticeProjectDocumentRequest,
+   type LatticeProjectDocumentType,
+   type LatticeMindMapArgs,
++  type LatticeExperimentArgs,
+ } from "./Services/LatticeProjectDocumentBroker.ts";
+ import { mcpToolResultError, mcpToolResultJson } from "./protocol.ts";
+ import {
+@@ -101,6 +102,36 @@
+   throw new ProjectDocumentInputError(
+     "Use add, rename, or delete. Add and rename need a single-line label.",
+   );
++}
++
++function parseExperimentArgs(args: Record<string, unknown>, read: boolean): LatticeExperimentArgs {
++  if (read) {
++    if (
++      Object.keys(args).some((key) => key !== "id") ||
++      (args.id !== undefined &&
++        (typeof args.id !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(args.id)))
++    ) {
++      throw new ProjectDocumentInputError("Supply an experiment ID or no arguments to list.");
++    }
++    return {
++      operation: "experiment_read",
++      ...(typeof args.id === "string" ? { id: args.id } : {}),
++    };
++  }
++  const input = args.input;
++  if (
++    Object.keys(args).length !== 1 ||
++    !isRecord(input) ||
++    (input.operation !== "create" &&
++      input.operation !== "update" &&
++      input.operation !== "comment") ||
++    Buffer.byteLength(JSON.stringify(input)) > 32768
++  ) {
++    throw new ProjectDocumentInputError(
++      "Supply one bounded create, update, or comment input. Human decisions and verification are available in the panel.",
++    );
++  }
++  return { operation: "experiment_write", input };
+ }
+ 
+ export const makeLatticeProjectDocumentTools = (options: {
+@@ -212,5 +243,63 @@
+           ),
+       }),
+     );
+-    return [createProjectDocument, ...mindMapTools] satisfies ReadonlyArray<ToolEntry>;
++    const experimentTools = ([true, false] as const).map(
++      (read): ToolEntry => ({
++        requiredCapability: read ? "thread:read" : "thread:write",
++        requiresActiveTurn: true,
++        definition: {
++          name: read ? "experiments_read" : "experiments_write",
++          description: read
++            ? "List recent experiments in the active project, or read one by ID including its hypothesis, evidence, human decisions and recent history."
++            : "Record an experiment in the active project. input.operation=create needs fields title, hypothesis, prediction, motivation and learningGoal. input.operation=update needs id and fields from status, baselineId, candidate, progress, budget, runtime, correctness, findings, next, metric or evidence. Status goes planned to running to completed or failed. metric has name, value, unit, direction (lower or higher), and evaluation (identity of dataset and protocol). evidence is a list of kind (source, log, result, other) and project-relative path. input.operation=comment needs id and text. Humans approve, reject and verify through the panel.",
++          inputSchema: {
++            type: "object",
++            properties: read
++              ? { id: { type: "string" } }
++              : {
++                  input: {
++                    type: "object",
++                    properties: {
++                      operation: { type: "string", enum: ["create", "update", "comment"] },
++                      id: { type: "string" },
++                      fields: { type: "object", additionalProperties: true },
++                      text: { type: "string" },
++                    },
++                    required: ["operation"],
++                    additionalProperties: false,
++                  },
++                },
++            required: read ? [] : ["input"],
++            additionalProperties: false,
++          },
++          annotations: read
++            ? READ_ONLY_TOOL_ANNOTATIONS
++            : { ...WRITE_TOOL_ANNOTATIONS, destructiveHint: false },
++        },
++        handler: (args, context) =>
++          Effect.gen(function* () {
++            const parsed = yield* Effect.try({
++              try: () => parseExperimentArgs(args, read),
++              catch: (error) => error,
++            });
++            const root = yield* options.resolveWorkspaceRoot(context);
++            if (!root)
++              return yield* Effect.fail(
++                new LatticeProjectDocumentBrokerError(
++                  "experiment_workspace_unavailable",
++                  "The caller task has no Lattice workspace.",
++                ),
++              );
++            return yield* broker.invoke(root, parsed);
++          }).pipe(
++            Effect.map(mcpToolResultJson),
++            Effect.catch((error) => Effect.succeed(errorResult(error))),
++          ),
++      }),
++    );
++    return [
++      createProjectDocument,
++      ...mindMapTools,
++      ...experimentTools,
++    ] satisfies ReadonlyArray<ToolEntry>;
+   });
+--- a/apps/web/src/latticeProjectDocumentRelay.ts
++++ b/apps/web/src/latticeProjectDocumentRelay.ts
+@@ -3,6 +3,8 @@
+ export const SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST = "synara:project-document-tool-request";
+ export const LATTICE_PROJECT_DOCUMENT_TOOL_RESULT = "lattice:project-document-tool-result";
+ const MIND_MAP_REQUEST = "synara:mind-map-tool-request";
++const EXPERIMENT_REQUEST = "synara:experiment-tool-request";
++const EXPERIMENT_RESULT = "lattice:experiment-tool-result";
+ const MIND_MAP_RESULT = "lattice:mind-map-tool-result";
+ const RESULT_PATH = "/api/lattice/project-document-tools/result";
+ const HOST_TIMEOUT_MS = 30_000;
+@@ -17,7 +19,9 @@
+ 
+ type MindMapRequest = {
+   readonly id: string;
+-  readonly args: Record<string, unknown> & { operation: "read" | "add" | "rename" | "delete" };
++  readonly args: Record<string, unknown> & {
++    operation: "read" | "add" | "rename" | "delete" | "experiment_read" | "experiment_write";
++  };
+   readonly expiresAt: number;
+   readonly workspaceRoot: string;
+ };
+@@ -94,6 +98,23 @@
+   )
+     return null;
+   const { operation, nodeId, label } = value.args;
++  if (
++    operation === "experiment_read" &&
++    hasOnlyKeys(value.args, ["operation", "id"]) &&
++    (value.args.id === undefined ||
++      (typeof value.args.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value.args.id)))
++  ) {
++    return { ...value, workspaceRoot } as MindMapRequest;
++  }
++  if (
++    operation === "experiment_write" &&
++    hasOnlyKeys(value.args, ["operation", "input"]) &&
++    isRecord(value.args.input) &&
++    new TextEncoder().encode(JSON.stringify(value.args.input)).byteLength <= 32768
++  ) {
++    return { ...value, workspaceRoot } as MindMapRequest;
++  }
++
+   const valid =
+     operation === "read"
+       ? hasOnlyKeys(value.args, ["operation"])
+@@ -187,7 +208,8 @@
+   hostOrigin: string,
+   timeoutMs = HOST_TIMEOUT_MS,
+ ): Promise<RelayResult> {
+-  const mindMap = "workspaceRoot" in request;
++  const projectTool = "workspaceRoot" in request;
++  const experiment = projectTool && request.args.operation.startsWith("experiment_");
+   return new Promise((resolve) => {
+     let settled = false;
+     const finish = (result: RelayResult) => {
+@@ -203,14 +225,23 @@
+       }
+       const data = event.data;
+       if (
+-        data.type !== (mindMap ? MIND_MAP_RESULT : LATTICE_PROJECT_DOCUMENT_TOOL_RESULT) ||
++        data.type !==
++          (experiment
++            ? EXPERIMENT_RESULT
++            : projectTool
++              ? MIND_MAP_RESULT
++              : LATTICE_PROJECT_DOCUMENT_TOOL_RESULT) ||
+         data.version !== 1 ||
+         data.id !== request.id
+       ) {
+         return;
+       }
+-      if (!mindMap) finish(parseHostResult(data, request));
+-      else if (data.ok === true && isRecord(data.result) && data.result.kind === "mind_map") {
++      if (!projectTool) finish(parseHostResult(data, request));
++      else if (
++        data.ok === true &&
++        isRecord(data.result) &&
++        data.result.kind === (experiment ? "experiments" : "mind_map")
++      ) {
+         finish({ ok: true, result: data.result });
+       } else if (
+         data.ok === false &&
+@@ -243,8 +274,12 @@
+     window.addEventListener("message", onMessage);
+     window.parent.postMessage(
+       {
+-        type: mindMap ? MIND_MAP_REQUEST : SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST,
+-        ...(mindMap ? { workspaceRoot: request.workspaceRoot } : {}),
++        type: experiment
++          ? EXPERIMENT_REQUEST
++          : projectTool
++            ? MIND_MAP_REQUEST
++            : SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST,
++        ...(projectTool ? { workspaceRoot: request.workspaceRoot } : {}),
+         version: 1,
+         id: request.id,
+         args: request.args,

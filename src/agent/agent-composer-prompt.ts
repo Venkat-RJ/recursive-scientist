@@ -26,6 +26,7 @@ export interface AgentComposerPromptMessage {
    * question or approval pending it falls back to a draft.
    */
   mode: "draft" | "send";
+  thread?: "active" | "new";
 }
 
 function buildAgentComposerPromptMessage(

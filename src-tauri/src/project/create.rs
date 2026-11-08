@@ -55,6 +55,26 @@ const USTCTHESIS_TEMPLATE: TemplateFiles = venue_template!("ustcthesis":
     "figures/ustc-title-page-heading.pdf",
 );
 
+const SCHEDULING_TEMPLATE: TemplateFiles = venue_template!("scheduling-optimization":
+    "main.md",
+    "SETUP.md",
+    "DATA_SOURCES.md",
+    "prior-knowledge.json",
+    "candidate.py",
+    "baseline.py",
+    "evaluator.py",
+    "data/demo.csv",
+    "data/demo-2.csv",
+    "scripts/candidate_worker.py",
+    "scripts/fetch_benchmark.py",
+    "scripts/generate_demo.py",
+    "tests/test_evaluator.py",
+);
+
+const RESEARCH_TEMPLATE: TemplateFiles = venue_template!("scientific-research": "main.md");
+const RESEARCH_AGENT_CONTEXT: TemplateFiles =
+    venue_template!("scientific-research": "AGENTS.md", "CLAUDE.md");
+
 const TUTORIAL_PROJECT_NAME: &str = "Understanding Attention";
 
 /// A bundled tutorial file, written at the same path it has under `templates/tutorial`.
@@ -94,6 +114,8 @@ pub enum Venue {
     Blank,
     /// A blank `ctexart` article: Chinese text, headings, dates and numbering.
     ChineseArticle,
+    SchedulingOptimization,
+    ScientificResearch,
 }
 
 impl Venue {
@@ -109,8 +131,10 @@ impl Venue {
             "ustcthesis" => Ok(Self::Ustcthesis),
             "blank" => Ok(Self::Blank),
             "chinese-article" | "ctexart" => Ok(Self::ChineseArticle),
+            "scheduling-optimization" => Ok(Self::SchedulingOptimization),
+            "scientific-research" => Ok(Self::ScientificResearch),
             other => Err(format!(
-                "Unknown venue “{other}”. Choose neurips, icml, iclr, acl, cvpr, aaai, thuthesis, ustcthesis, blank, or chinese-article."
+                "Unknown venue “{other}”. Choose neurips, icml, iclr, acl, cvpr, aaai, thuthesis, ustcthesis, blank, chinese-article, scheduling-optimization, or scientific-research."
             )),
         }
     }
@@ -127,6 +151,8 @@ impl Venue {
             Self::Ustcthesis => "ustcthesis",
             Self::Blank => "blank",
             Self::ChineseArticle => "chinese-article",
+            Self::SchedulingOptimization => "scheduling-optimization",
+            Self::ScientificResearch => "scientific-research",
         }
     }
 
@@ -138,7 +164,12 @@ impl Venue {
             Self::Neurips | Self::Iclr => Some(9),
             Self::Icml | Self::Acl | Self::Cvpr => Some(8),
             Self::Aaai => Some(7),
-            Self::Thuthesis | Self::Ustcthesis | Self::Blank | Self::ChineseArticle => None,
+            Self::Thuthesis
+            | Self::Ustcthesis
+            | Self::Blank
+            | Self::ChineseArticle
+            | Self::SchedulingOptimization
+            | Self::ScientificResearch => None,
         }
     }
 
@@ -156,6 +187,7 @@ impl Venue {
             Self::Neurips | Self::Icml | Self::Iclr | Self::Acl | Self::Cvpr | Self::Aaai => "pdf",
             Self::Thuthesis | Self::Ustcthesis | Self::ChineseArticle => "xelatex",
             Self::Blank => "lualatex",
+            Self::SchedulingOptimization | Self::ScientificResearch => "pdf",
         }
     }
 
@@ -163,6 +195,10 @@ impl Venue {
     /// character of the project name.
     fn loads_cjk_fonts(self) -> bool {
         matches!(self, Self::Thuthesis | Self::Ustcthesis | Self::ChineseArticle)
+    }
+
+    fn is_research(self) -> bool {
+        matches!(self, Self::SchedulingOptimization | Self::ScientificResearch)
     }
 
     fn template(self) -> TemplateFiles {
@@ -175,6 +211,8 @@ impl Venue {
             Self::Aaai => AAAI_TEMPLATE,
             Self::Thuthesis => THUTHESIS_TEMPLATE,
             Self::Ustcthesis => USTCTHESIS_TEMPLATE,
+            Self::SchedulingOptimization => SCHEDULING_TEMPLATE,
+            Self::ScientificResearch => RESEARCH_TEMPLATE,
             Self::Blank => &[("main.tex", b"\\documentclass{article}\n\\begin{document}\n\\title{LATTICE_PROJECT_TITLE}\n\\maketitle\n\n\\end{document}\n")],
             Self::ChineseArticle => &[("main.tex", b"\\documentclass{ctexart}\n\\begin{document}\n\\title{LATTICE_PROJECT_TITLE}\n\\maketitle\n\n\\end{document}\n")],
         }
@@ -221,12 +259,27 @@ pub fn create(parent: &Path, name: &str) -> Result<PathBuf, String> {
 
 pub fn create_with_venue(parent: &Path, name: &str, venue: Venue) -> Result<PathBuf, String> {
     let (root, name) = prepare_project_skeleton(parent, name)?;
-    write_manifest(&root, &default_manifest_with_venue(name, venue))?;
+    let mut manifest = default_manifest_with_venue(name, venue);
+    if venue.is_research() {
+        manifest.root_documents.clear();
+    }
+    if venue == Venue::SchedulingOptimization {
+        for ignore in ["__pycache__/", "/data/*_set.zip"] {
+            super::manifest::ensure_ignore_line(&root.join(".gitignore"), ignore)?;
+        }
+    }
+    write_manifest(&root, &manifest)?;
     // A thesis class also takes English theses; the Chinese article is for Chinese.
     let language = if venue == Venue::ChineseArticle { "Chinese" } else { "English" };
-    fs::write(root.join(".research/brief.md"), brief_in(name, language)).map_err(err)?;
+    let agent_context = if venue.is_research() { RESEARCH_AGENT_CONTEXT } else { &[] };
+    let brief = if venue.is_research() {
+        format!("# {name}\n\nRead main.md and AGENTS.md before investigating.\n")
+    } else {
+        brief_in(name, language)
+    };
+    fs::write(root.join(".research/brief.md"), brief).map_err(err)?;
     let title = latex_title(name, venue.loads_cjk_fonts());
-    for (relative, contents) in venue.template() {
+    for (relative, contents) in venue.template().iter().chain(agent_context) {
         let path = root.join(relative);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(err)?;
@@ -416,6 +469,39 @@ mod tests {
 
     fn read(root: &Path, relative: &str) -> String {
         fs::read_to_string(root.join(relative)).unwrap()
+    }
+
+    #[test]
+    fn scheduling_template_opens_without_a_latex_root() {
+        let parent = Fixture::empty("scheduling-template");
+        let venue = Venue::parse("scheduling-optimization").unwrap();
+        let root = create_with_venue(&parent.root, "Scheduling", venue).unwrap();
+        let snapshot = super::super::open(&root).unwrap();
+        assert_eq!(snapshot.manifest.venue, "scheduling-optimization");
+        assert!(snapshot.manifest.root_documents.is_empty());
+        assert_eq!(snapshot.manifest.page_budget, None);
+        assert!(!root.join("main.tex").exists());
+        assert!(!root.join("data/training_set.zip").exists());
+        assert!(!root.join("data/test_set.zip").exists());
+        for (path, bytes) in SCHEDULING_TEMPLATE {
+            assert_eq!(&fs::read(root.join(path)).unwrap(), bytes, "{path}");
+        }
+        assert!(snapshot.files.iter().any(|node| node.path == "main.md"));
+        assert!(read(&root, "AGENTS.md").contains("Read `main.md`"));
+        assert_eq!(read(&root, "CLAUDE.md").trim(), "@AGENTS.md");
+        assert!(create_with_venue(&parent.root, "Scheduling", venue).is_err());
+    }
+
+    #[test]
+    fn scientific_research_seeds_a_notebook_and_provider_context() {
+        let parent = Fixture::empty("scientific-research");
+        let venue = Venue::parse("scientific-research").unwrap();
+        let root = create_with_venue(&parent.root, "Research", venue).unwrap();
+        assert!(super::super::open(&root).unwrap().manifest.root_documents.is_empty());
+        assert!(read(&root, "main.md").contains("## Current Understanding"));
+        assert!(read(&root, "AGENTS.md").contains("falsification criterion"));
+        assert_eq!(read(&root, "CLAUDE.md").trim(), "@AGENTS.md");
+        assert!(!root.join("main.tex").exists());
     }
 
     #[test]

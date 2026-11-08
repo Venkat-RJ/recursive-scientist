@@ -1,0 +1,18 @@
+.formulation-revision, .formulation-form, .formulation-form label, .formulation-section dl, .formulation-summary {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.formulation-revision, .formulation-form label { gap: var(--space-2); }
+.formulation-summary { gap: var(--space-3); }
+.formulation-section dd { white-space: pre-wrap; }
+.formulation-section .formulation-source { justify-content: flex-start; text-align: start; }
+
+@container research-panel (min-width: 640px) {
+  .formulation-content {
+    inline-size: 100%;
+    max-inline-size: 760px;
+    margin-inline: auto;
+    padding: var(--space-12);
+  }
+}

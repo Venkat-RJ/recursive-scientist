@@ -56,7 +56,7 @@ type SavedLayout = {
 
 export const VIEW_TYPES = [
   "project", "papers", "agent", "pdf", "file", "slot", "terminal",
-  "history", "git", "comments", "overleaf", "literature", "todos", "checklist", "start",
+  "history", "git", "comments", "overleaf", "literature", "web-knowledge", "github-knowledge", "todos", "checklist", "mind-map", "formulation", "prior-knowledge", "experiments", "research-progress", "start",
 ] as const;
 
 /**
@@ -75,6 +75,20 @@ export function defaultLayout(): LayoutDocument {
       ], [0.62, 0.38]),
       L.panel({ id: "panel-pdf" }, L.view("pdf", { id: "pdf" })),
     ], [0.36, 0.64]),
+    { version: LAYOUT_VERSION },
+  );
+}
+
+/** The notebook gets the main surface; the existing navigator, agent, and papers stay within reach. */
+function researchLayout(): LayoutDocument {
+  return createDocument(
+    L.row([
+      L.column([
+        L.panel({ id: "panel-project", selected: 0 }, L.view("project", { id: "project" }), L.view("agent", { id: "agent" })),
+        L.panel({ id: "panel-papers" }, L.view("papers", { id: "papers" })),
+      ], [0.62, 0.38]),
+      L.panel({ id: "panel-research" }, L.view("slot", { id: "slot-panel-research" })),
+    ], [0.28, 0.72]),
     { version: LAYOUT_VERSION },
   );
 }
@@ -532,7 +546,7 @@ export function saveLayout(
  * layout of its own starts as that workspace was saved: App's tab sync puts
  * its documents in the arrangement's slots.
  */
-export function openProjectLayout(projectRoot: string, library: WorkspaceLibrary): ProjectLayout & { workspace: string } {
+export function openProjectLayout(projectRoot: string, library: WorkspaceLibrary, research = false): ProjectLayout & { workspace: string } {
   // The first library is migrated from the projects' saved layouts, this one's included.
   library.refresh();
   const loaded = loadLayout(projectRoot);
@@ -541,6 +555,7 @@ export function openProjectLayout(projectRoot: string, library: WorkspaceLibrary
   const workspace = loaded?.workspace && library.get(loaded.workspace) ? loaded.workspace : library.recent();
   library.use(workspace);
   if (loaded) return { ...loaded, places, workspace };
+  if (research) return { document: researchLayout(), preset: null, focus: null, workspace, places };
   // A workspace never saved is the default layout, which gets a document panel with the first document.
   const arrangement = library.get(workspace)?.arrangement;
   return { document: arrangement ? sanitize(arrangement, knownType) : defaultLayout(), preset: null, focus: null, workspace, places };

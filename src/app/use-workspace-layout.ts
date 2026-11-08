@@ -1,7 +1,8 @@
 import { useCallback, useEffect } from "react";
 import type { DocumentViewMode, PaperSummary, ProjectSnapshot } from "../app-types";
-import { arxivIdFromTabKey, isHtmlFilePath, isPaperTabKey } from "../app-utils";
+import { arxivIdFromTabKey, isPaperTabKey } from "../app-utils";
 import { loadLastFile, loadWorkspaceLayout, persistLastFile, persistWorkspaceLayout } from "../settings/app-settings";
+import { hasPerFileViewMode } from "./document-view-modes";
 import type { DocumentOpens } from "./use-document-opens";
 import type { DocumentStore } from "./use-document-store";
 import { planWorkspaceRestore } from "./workspace-restore";
@@ -25,7 +26,7 @@ export type ProjectEntry = {
 export function useWorkspaceLayout(store: DocumentStore, opens: DocumentOpens) {
   const {
     depsRef, projectRef, projectOperationGenerationRef, projectRoot, intentRef, viewStates,
-    file, tabs, setTabs, activeTab, mode, setMode, paperView, setPaperView, htmlModesRef, documentModeRef, bibModeRef,
+    file, tabs, setTabs, activeTab, mode, setMode, paperView, setPaperView, fileViewModesRef, documentModeRef, bibModeRef,
     persistenceReadyRoot, setPersistenceReadyRoot, setTabsSettledRoot, setNavStack, setNavIndex,
     setPaper, setAsset, setPaperBuffers, showFileText,
   } = store;
@@ -74,7 +75,7 @@ export function useWorkspaceLayout(store: DocumentStore, opens: DocumentOpens) {
     setPaperBuffers("", null);
     setTabs([]);
     setMode("split");
-    htmlModesRef.current.clear();
+    fileViewModesRef.current.clear();
     documentModeRef.current = "split";
     bibModeRef.current = "source";
     /** A newer file intent from the writer cancels the rest of the restore. */
@@ -100,7 +101,7 @@ export function useWorkspaceLayout(store: DocumentStore, opens: DocumentOpens) {
         primaryGeneration = intentRef.current;
         if (!ownsProjectRestore()) return false;
         if (!restoreIsCurrent()) return supersede();
-        if (isHtmlFilePath(restoredTab)) htmlModesRef.current.set(restoredTab, restoredMode as DocumentViewMode);
+        if (hasPerFileViewMode(restoredTab)) fileViewModesRef.current.set(restoredTab, restoredMode as DocumentViewMode);
         setTabs(plan.tabs);
         setTabsSettledRoot(snapshot.root);
         setMode(restoredMode);
@@ -137,7 +138,7 @@ export function useWorkspaceLayout(store: DocumentStore, opens: DocumentOpens) {
       },
     };
   }, [
-    bibModeRef, depsRef, documentModeRef, htmlModesRef, intentRef, loadFile, openAsset, openPaper,
+    bibModeRef, depsRef, documentModeRef, fileViewModesRef, intentRef, loadFile, openAsset, openPaper,
     projectOperationGenerationRef, projectRef, setAsset, setMode, setNavIndex, setNavStack, setPaper,
     setPaperBuffers, setPaperView, setPersistenceReadyRoot, setTabs, setTabsSettledRoot, showFileText, viewStates,
   ]);

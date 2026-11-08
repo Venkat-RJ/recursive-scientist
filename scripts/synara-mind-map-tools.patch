@@ -1,0 +1,449 @@
+diff --git a/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts b/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts
+index b76971d..f06a40f 100644
+--- a/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts
++++ b/apps/server/src/agentGateway/Layers/LatticeProjectDocumentBroker.ts
+@@ -28,6 +28,7 @@ export function makeLatticeProjectDocumentBroker(
+     string,
+     {
+       readonly workspaceRoot: string;
++      readonly mindMap: boolean;
+       readonly resolve: (value: unknown) => void;
+       readonly reject: (error: LatticeProjectDocumentBrokerError) => void;
+       readonly timer: ReturnType<typeof setTimeout>;
+@@ -59,6 +60,7 @@ export function makeLatticeProjectDocumentBroker(
+         }, toolTimeoutMs);
+         pending.set(id, {
+           workspaceRoot,
++          mindMap: "operation" in args,
+           resolve: (value) => resume(Effect.succeed(value)),
+           reject: (error) => resume(Effect.fail(error)),
+           timer,
+@@ -74,6 +76,15 @@ export function makeLatticeProjectDocumentBroker(
+       Effect.sync(() => {
+         const entry = pending.get(id);
+         if (!entry || entry.workspaceRoot !== workspaceRoot) return false;
++        if (result.ok) {
++          const value = result.result;
++          const mindMap =
++            value !== null &&
++            typeof value === "object" &&
++            "kind" in value &&
++            value.kind === "mind_map";
++          if (entry.mindMap !== mindMap) return false;
++        }
+         pending.delete(id);
+         clearTimeout(entry.timer);
+         if (result.ok) entry.resolve(result.result);
+diff --git a/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts b/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts
+index 60bc885..3bf5ea7 100644
+--- a/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts
++++ b/apps/server/src/agentGateway/Services/LatticeProjectDocumentBroker.ts
+@@ -3,12 +3,19 @@ import type { Effect } from "effect";
+ 
+ export type LatticeProjectDocumentType = "board" | "spreadsheet";
+ 
++export type LatticeMindMapArgs =
++  | { readonly operation: "read" }
++  | { readonly operation: "add" | "rename"; readonly nodeId: string; readonly label: string }
++  | { readonly operation: "delete"; readonly nodeId: string };
++
+ export interface LatticeProjectDocumentRequest {
+   readonly id: string;
+-  readonly args: {
+-    readonly path: string;
+-    readonly documentType: LatticeProjectDocumentType;
+-  };
++  readonly args:
++    | {
++        readonly path: string;
++        readonly documentType: LatticeProjectDocumentType;
++      }
++    | LatticeMindMapArgs;
+   readonly expiresAt: number;
+ }
+ 
+diff --git a/apps/server/src/agentGateway/harnessPolicy.ts b/apps/server/src/agentGateway/harnessPolicy.ts
+index 0d5bea1..ca76e67 100644
+--- a/apps/server/src/agentGateway/harnessPolicy.ts
++++ b/apps/server/src/agentGateway/harnessPolicy.ts
+@@ -50,6 +50,7 @@ export function renderSynaraHarnessPolicy(capabilities: SynaraHarnessCapabilitie
+             "For two or more independent tasks, submit one exact create_tasks batch. The array length must equal the requested task count; do not replace a failed durable operation with extra tasks.",
+             "When delegated results are needed, call wait_for_tasks for every created task id and repeat it with the returned runIds until allTerminal is true, then synthesize all outcomes. Use send_message_to_task only for a scoped follow-up and interrupt_task only when work should stop.",
+             "Provider-native subagents may be used for internal parallel work. Lattice tasks are durable project conversations; use create_task or create_tasks when the user needs separately inspectable task history.",
++            "Use mind_map_read to inspect the active project Mind Map and mind_map_update to add, rename, or delete its nodes. Use the returned node IDs.",
+             "Use create_project_document to create and open a native Lattice board or spreadsheet. After it succeeds for a board, use create_canvas_shapes to populate the newly opened canvas; after it succeeds for a spreadsheet, use spreadsheet_batch_update to populate the new workbook. Never create either native format by writing its serialized file contents directly.",
+             "Use preview_presentation_page to look at an Open Slide page after creating or editing it; it renders the deck's files as they now stand on disk. Never say a page was visually checked unless that tool returned its image.",
+             "When you draw or change a TikZ, PGFPlots or other LaTeX figure, preview it with preview_latex_figure, fix what reads badly in its image, and preview again before inserting it; insert the figure environment it returns with your ordinary file edit. Never say a figure was visually checked unless that tool returned its image.",
+diff --git a/apps/server/src/agentGateway/hostProfile.ts b/apps/server/src/agentGateway/hostProfile.ts
+index 14045cb..5a8b9cc 100644
+--- a/apps/server/src/agentGateway/hostProfile.ts
++++ b/apps/server/src/agentGateway/hostProfile.ts
+@@ -91,6 +91,8 @@ const LATTICE_NATIVE_TOOL_NAMES = new Set([
+   "spreadsheet_read",
+   "spreadsheet_batch_update",
+   "create_project_document",
++  "mind_map_read",
++  "mind_map_update",
+   "read_editor_comments",
+   "preview_presentation_page",
+   "preview_latex_figure",
+diff --git a/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts b/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts
+index 49d15d7..c0198dd 100644
+--- a/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts
++++ b/apps/server/src/agentGateway/latticeProjectDocumentHttpRoute.ts
+@@ -10,7 +10,7 @@ import {
+ } from "./Services/LatticeProjectDocumentBroker.ts";
+ 
+ export const LATTICE_PROJECT_DOCUMENT_RESULT_PATH = "/api/lattice/project-document-tools/result";
+-export const LATTICE_PROJECT_DOCUMENT_MAX_BODY_BYTES = 16 * 1024;
++export const LATTICE_PROJECT_DOCUMENT_MAX_BODY_BYTES = 256 * 1024;
+ 
+ function isRecord(value: unknown): value is Record<string, unknown> {
+   return value !== null && typeof value === "object" && !Array.isArray(value);
+@@ -34,6 +34,29 @@ function isPath(value: unknown): value is string {
+ }
+ 
+ function isSuccessResult(value: unknown): boolean {
++  if (isRecord(value) && value.kind === "mind_map") {
++    if (Array.isArray(value.nodes)) {
++      return (
++        hasOnlyKeys(value, ["kind", "nodes"]) &&
++        value.nodes.every(
++          (node) =>
++            isRecord(node) &&
++            hasOnlyKeys(node, ["id", "label", "parentId"]) &&
++            typeof node.id === "string" &&
++            typeof node.label === "string" &&
++            (node.parentId === null || typeof node.parentId === "string"),
++        )
++      );
++    }
++    return (
++      hasOnlyKeys(value, ["kind", "operation", "nodeId", "label", "deletedCount"]) &&
++      typeof value.nodeId === "string" &&
++      (value.operation === "delete"
++        ? Number.isSafeInteger(value.deletedCount) && Number(value.deletedCount) > 0
++        : (value.operation === "add" || value.operation === "rename") &&
++          typeof value.label === "string")
++    );
++  }
+   return (
+     isRecord(value) &&
+     hasOnlyKeys(value, ["path", "documentType", "opened"]) &&
+diff --git a/apps/server/src/agentGateway/latticeProjectDocumentTools.test.ts b/apps/server/src/agentGateway/latticeProjectDocumentTools.test.ts
+index 5f88a5c..ad112f4 100644
+--- a/apps/server/src/agentGateway/latticeProjectDocumentTools.test.ts
++++ b/apps/server/src/agentGateway/latticeProjectDocumentTools.test.ts
+@@ -29,12 +29,13 @@ const context: ToolContext = {
+ async function makeHarness() {
+   const calls: Array<{
+     readonly workspaceRoot: string;
+-    readonly args: { readonly path: string; readonly documentType: string };
++    readonly args: Parameters<LatticeProjectDocumentBrokerShape["invoke"]>[1];
+   }> = [];
+   const broker: LatticeProjectDocumentBrokerShape = {
+     invoke: (workspaceRoot, args) =>
+       Effect.sync(() => {
+         calls.push({ workspaceRoot, args });
++        if ("operation" in args) return { kind: "mind_map", nodes: [] };
+         return { path: args.path, documentType: args.documentType, opened: true };
+       }),
+     complete: () => Effect.succeed(false),
+@@ -44,7 +45,7 @@ async function makeHarness() {
+       resolveWorkspaceRoot: () => Effect.succeed("/workspace/project"),
+     }).pipe(Effect.provideService(LatticeProjectDocumentBroker, broker)),
+   );
+-  return { calls, create: tools[0]! };
++  return { calls, create: tools[0]!, read: tools[1]!, update: tools[2]! };
+ }
+ 
+ function errorCode(result: unknown) {
+@@ -86,6 +87,29 @@ describe("Lattice project document tool", () => {
+     });
+   });
+ 
++  it("scopes Mind Map operations to the caller workspace and validates updates", async () => {
++    const { calls, read, update } = await makeHarness();
++    expect(read.definition.name).toBe("mind_map_read");
++    expect(read.requiredCapability).toBe("thread:read");
++    expect(update.requiredCapability).toBe("thread:write");
++    await Effect.runPromise(read.handler({}, context));
++    await Effect.runPromise(
++      update.handler({ operation: "add", nodeId: "topic-0", label: "Branch" }, context),
++    );
++    expect(calls).toEqual([
++      { workspaceRoot: "/workspace/project", args: { operation: "read" } },
++      {
++        workspaceRoot: "/workspace/project",
++        args: { operation: "add", nodeId: "topic-0", label: "Branch" },
++      },
++    ]);
++    const rejected = await Effect.runPromise(
++      update.handler({ operation: "delete", nodeId: "x", workspaceRoot: "/other" }, context),
++    );
++    expect(rejected.isError).toBe(true);
++    expect(calls).toHaveLength(2);
++  });
++
+   it("rejects traversal, absolute paths, and mismatched native extensions", async () => {
+     const { calls, create } = await makeHarness();
+     for (const args of [
+diff --git a/apps/server/src/agentGateway/latticeProjectDocumentTools.ts b/apps/server/src/agentGateway/latticeProjectDocumentTools.ts
+index 8cc344a..2eae96b 100644
+--- a/apps/server/src/agentGateway/latticeProjectDocumentTools.ts
++++ b/apps/server/src/agentGateway/latticeProjectDocumentTools.ts
+@@ -5,9 +5,15 @@ import {
+   LatticeProjectDocumentBrokerError,
+   type LatticeProjectDocumentRequest,
+   type LatticeProjectDocumentType,
++  type LatticeMindMapArgs,
+ } from "./Services/LatticeProjectDocumentBroker.ts";
+ import { mcpToolResultError, mcpToolResultJson } from "./protocol.ts";
+-import { WRITE_TOOL_ANNOTATIONS, type ToolContext, type ToolEntry } from "./toolRuntime.ts";
++import {
++  READ_ONLY_TOOL_ANNOTATIONS,
++  WRITE_TOOL_ANNOTATIONS,
++  type ToolContext,
++  type ToolEntry,
++} from "./toolRuntime.ts";
+ 
+ class ProjectDocumentInputError extends Error {}
+ 
+@@ -68,6 +74,35 @@ function errorResult(error: unknown) {
+   );
+ }
+ 
++function parseMindMapArgs(args: Record<string, unknown>, read: boolean): LatticeMindMapArgs {
++  if (read && Object.keys(args).length === 0) return { operation: "read" };
++  const { operation, nodeId, label } = args;
++  if (
++    read ||
++    typeof nodeId !== "string" ||
++    !nodeId.trim() ||
++    nodeId.length > 128 ||
++    Object.keys(args).some((key) => !["operation", "nodeId", "label"].includes(key))
++  ) {
++    throw new ProjectDocumentInputError(
++      "Read the map first and supply a valid nodeId for the edit.",
++    );
++  }
++  if (operation === "delete" && label === undefined) return { operation, nodeId };
++  if (
++    (operation === "add" || operation === "rename") &&
++    typeof label === "string" &&
++    label.trim() &&
++    label.length <= 160 &&
++    !/[\r\n]/.test(label)
++  ) {
++    return { operation, nodeId, label };
++  }
++  throw new ProjectDocumentInputError(
++    "Use add, rename, or delete. Add and rename need a single-line label.",
++  );
++}
++
+ export const makeLatticeProjectDocumentTools = (options: {
+   readonly resolveWorkspaceRoot: (context: ToolContext) => Effect.Effect<string | null>;
+ }) =>
+@@ -128,5 +163,54 @@ export const makeLatticeProjectDocumentTools = (options: {
+           Effect.catch((error) => Effect.succeed(errorResult(error))),
+         ),
+     };
+-    return [createProjectDocument] satisfies ReadonlyArray<ToolEntry>;
++    const mindMapTools = ([true, false] as const).map(
++      (read): ToolEntry => ({
++        requiredCapability: read ? "thread:read" : "thread:write",
++        requiresActiveTurn: true,
++        definition: {
++          name: read ? "mind_map_read" : "mind_map_update",
++          description: read
++            ? "Read the active Lattice project's Mind Map as nodes with stable IDs and parent IDs."
++            : "Edit the active Lattice project's Mind Map. Read it first for node IDs. Add creates a child of nodeId, rename changes its label, and delete removes the node and its descendants. The main topic cannot be deleted.",
++          inputSchema: {
++            type: "object",
++            properties: read
++              ? {}
++              : {
++                  operation: { type: "string", enum: ["add", "rename", "delete"] },
++                  nodeId: { type: "string", minLength: 1, maxLength: 128 },
++                  label: {
++                    type: "string",
++                    minLength: 1,
++                    maxLength: 160,
++                    description: "Required for add and rename.",
++                  },
++                },
++            required: read ? [] : ["operation", "nodeId"],
++            additionalProperties: false,
++          },
++          annotations: read ? READ_ONLY_TOOL_ANNOTATIONS : WRITE_TOOL_ANNOTATIONS,
++        },
++        handler: (args, context) =>
++          Effect.gen(function* () {
++            const parsed = yield* Effect.try({
++              try: () => parseMindMapArgs(args, read),
++              catch: (error) => error,
++            });
++            const workspaceRoot = yield* options.resolveWorkspaceRoot(context);
++            if (!workspaceRoot)
++              return yield* Effect.fail(
++                new LatticeProjectDocumentBrokerError(
++                  "mind_map_workspace_unavailable",
++                  "The caller task has no Lattice workspace.",
++                ),
++              );
++            return yield* broker.invoke(workspaceRoot, parsed);
++          }).pipe(
++            Effect.map(mcpToolResultJson),
++            Effect.catch((error) => Effect.succeed(errorResult(error))),
++          ),
++      }),
++    );
++    return [createProjectDocument, ...mindMapTools] satisfies ReadonlyArray<ToolEntry>;
+   });
+diff --git a/apps/web/src/latticeProjectDocumentRelay.ts b/apps/web/src/latticeProjectDocumentRelay.ts
+index c96f181..558d631 100644
+--- a/apps/web/src/latticeProjectDocumentRelay.ts
++++ b/apps/web/src/latticeProjectDocumentRelay.ts
+@@ -2,6 +2,8 @@ import type { LatticeHostToolContext } from "./latticeHostToolRelay";
+ 
+ export const SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST = "synara:project-document-tool-request";
+ export const LATTICE_PROJECT_DOCUMENT_TOOL_RESULT = "lattice:project-document-tool-result";
++const MIND_MAP_REQUEST = "synara:mind-map-tool-request";
++const MIND_MAP_RESULT = "lattice:mind-map-tool-result";
+ const RESULT_PATH = "/api/lattice/project-document-tools/result";
+ const HOST_TIMEOUT_MS = 30_000;
+ 
+@@ -13,6 +15,13 @@ export interface ProjectDocumentRequest {
+   readonly expiresAt: number;
+ }
+ 
++type MindMapRequest = {
++  readonly id: string;
++  readonly args: Record<string, unknown> & { operation: "read" | "add" | "rename" | "delete" };
++  readonly expiresAt: number;
++  readonly workspaceRoot: string;
++};
++
+ export interface ProjectDocumentResult {
+   readonly type: typeof LATTICE_PROJECT_DOCUMENT_TOOL_RESULT;
+   readonly version: 1;
+@@ -72,6 +81,38 @@ export function parseProjectDocumentRequest(value: unknown): ProjectDocumentRequ
+   return value as unknown as ProjectDocumentRequest;
+ }
+ 
++function parseMindMapRequest(value: unknown, workspaceRoot: string): MindMapRequest | null {
++  if (
++    !isRecord(value) ||
++    !hasOnlyKeys(value, ["id", "args", "expiresAt"]) ||
++    typeof value.id !== "string" ||
++    !value.id ||
++    value.id.length > 128 ||
++    typeof value.expiresAt !== "number" ||
++    !Number.isFinite(value.expiresAt) ||
++    !isRecord(value.args)
++  )
++    return null;
++  const { operation, nodeId, label } = value.args;
++  const valid =
++    operation === "read"
++      ? hasOnlyKeys(value.args, ["operation"])
++      : typeof nodeId === "string" &&
++        Boolean(nodeId.trim()) &&
++        nodeId.length <= 128 &&
++        (operation === "delete"
++          ? hasOnlyKeys(value.args, ["operation", "nodeId"])
++          : (operation === "add" || operation === "rename") &&
++            hasOnlyKeys(value.args, ["operation", "nodeId", "label"]) &&
++            typeof label === "string" &&
++            Boolean(label.trim()) &&
++            label.length <= 160 &&
++            !/[\r\n]/.test(label));
++  return valid ? ({ ...value, workspaceRoot } as MindMapRequest) : null;
++}
++
++type RelayResult = Pick<ProjectDocumentResult, "ok" | "error"> & { result?: unknown };
++
+ function invalidHostResult(id: string, code: string, message: string): ProjectDocumentResult {
+   return {
+     type: LATTICE_PROJECT_DOCUMENT_TOOL_RESULT,
+@@ -142,13 +183,14 @@ function parseHostResult(
+ }
+ 
+ export function awaitProjectDocumentHostResult(
+-  request: ProjectDocumentRequest,
++  request: ProjectDocumentRequest | MindMapRequest,
+   hostOrigin: string,
+   timeoutMs = HOST_TIMEOUT_MS,
+-): Promise<ProjectDocumentResult> {
++): Promise<RelayResult> {
++  const mindMap = "workspaceRoot" in request;
+   return new Promise((resolve) => {
+     let settled = false;
+-    const finish = (result: ProjectDocumentResult) => {
++    const finish = (result: RelayResult) => {
+       if (settled) return;
+       settled = true;
+       clearTimeout(timer);
+@@ -161,13 +203,31 @@ export function awaitProjectDocumentHostResult(
+       }
+       const data = event.data;
+       if (
+-        data.type !== LATTICE_PROJECT_DOCUMENT_TOOL_RESULT ||
++        data.type !== (mindMap ? MIND_MAP_RESULT : LATTICE_PROJECT_DOCUMENT_TOOL_RESULT) ||
+         data.version !== 1 ||
+         data.id !== request.id
+       ) {
+         return;
+       }
+-      finish(parseHostResult(data, request));
++      if (!mindMap) finish(parseHostResult(data, request));
++      else if (data.ok === true && isRecord(data.result) && data.result.kind === "mind_map") {
++        finish({ ok: true, result: data.result });
++      } else if (
++        data.ok === false &&
++        isRecord(data.error) &&
++        typeof data.error.code === "string" &&
++        typeof data.error.message === "string"
++      ) {
++        finish({ ok: false, error: { code: data.error.code, message: data.error.message } });
++      } else {
++        finish(
++          invalidHostResult(
++            request.id,
++            "mind_map_host_invalid_result",
++            "The Mind Map host returned an invalid result.",
++          ),
++        );
++      }
+     };
+     const timer = window.setTimeout(
+       () =>
+@@ -183,7 +243,8 @@ export function awaitProjectDocumentHostResult(
+     window.addEventListener("message", onMessage);
+     window.parent.postMessage(
+       {
+-        type: SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST,
++        type: mindMap ? MIND_MAP_REQUEST : SYNARA_PROJECT_DOCUMENT_TOOL_REQUEST,
++        ...(mindMap ? { workspaceRoot: request.workspaceRoot } : {}),
+         version: 1,
+         id: request.id,
+         args: request.args,
+@@ -196,7 +257,7 @@ export function awaitProjectDocumentHostResult(
+ 
+ async function submitResult(
+   id: string,
+-  result: ProjectDocumentResult,
++  result: RelayResult,
+   token: string,
+   workspaceRoot: string,
+   signal: AbortSignal,
+@@ -228,7 +289,7 @@ export async function answerLatticeProjectDocumentRequest(
+   value: unknown,
+   { hostOrigin, workspaceRoot, token, signal }: LatticeHostToolContext,
+ ): Promise<void> {
+-  const request = parseProjectDocumentRequest(value);
++  const request = parseProjectDocumentRequest(value) ?? parseMindMapRequest(value, workspaceRoot);
+   if (!request) throw new Error("Project document poll returned an invalid request.");
+   const result =
+     request.expiresAt <= Date.now()

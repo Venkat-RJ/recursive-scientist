@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { modeOnLoad, panelViewMode, rememberedViewMode, setsDocumentMode, type RememberedViewModes } from "./document-view-modes";
 
 const modes = (overrides: Partial<RememberedViewModes> = {}): RememberedViewModes => ({
-  html: new Map([["site/chosen.html", "split"]]), bib: "source", document: "pdf", ...overrides,
+  files: new Map([["site/chosen.html", "split"]]), bib: "source", document: "pdf", ...overrides,
 });
 
 describe("document view modes", () => {
@@ -18,7 +18,7 @@ describe("document view modes", () => {
   it("draws LaTeX and other sources in the file panel as their source only", () => {
     expect(panelViewMode("main.tex", modes({ document: "split" }))).toBe("source");
     expect(panelViewMode("notes.txt", modes())).toBe("source");
-    expect(panelViewMode("notes.md", modes({ document: "split" }))).toBe("split");
+    expect(panelViewMode("notes.md", modes({ document: "split" }))).toBe("pdf");
     expect(panelViewMode("site/page.html", modes())).toBe("pdf");
     expect(panelViewMode("references.bib", modes({ bib: "pdf" }))).toBe("pdf");
   });
@@ -31,8 +31,12 @@ describe("document view modes", () => {
     expect(modeOnLoad("notes.md", "page.html", "split", true, modes())).toBe("pdf");
   });
 
-  it("remembers LaTeX and Markdown views, never an HTML file's or an asset's", () => {
-    expect(setsDocumentMode("notes.md", "pdf")).toBe(true);
+  it("remembers Markdown choices per file without changing the shared LaTeX view", () => {
+    const chosen = modes({ files: new Map([["notes.md", "source"]]), document: "split" });
+    expect(rememberedViewMode("notes.md", chosen)).toBe("source");
+    expect(rememberedViewMode("other.MD", chosen)).toBe("pdf");
+    expect(rememberedViewMode("main.tex", chosen)).toBe("split");
+    expect(setsDocumentMode("notes.md", "pdf")).toBe(false);
     expect(setsDocumentMode("main.tex", "split")).toBe(true);
     expect(setsDocumentMode("page.html", "pdf")).toBe(false);
     expect(setsDocumentMode("notes.md", "asset")).toBe(false);

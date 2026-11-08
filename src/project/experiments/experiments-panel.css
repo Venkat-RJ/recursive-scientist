@@ -1,0 +1,22 @@
+.experiment-index, .experiment-form, .experiment-detail { display: grid; gap: var(--space-4); min-width: 0; }
+.experiment-list { max-block-size: 9.5rem; overflow: auto; }
+.experiment-form label { display: grid; gap: var(--space-2); min-width: 0; }
+.experiment-form > button { justify-self: start; }
+.experiment-detail { border-top: 1px solid var(--border-subtle); padding-block-start: var(--space-6); }
+.experiment-detail dl { display: grid; gap: var(--space-4); }
+.experiment-detail :is(dd, li p, .experiment-hypothesis) { white-space: pre-wrap; }
+.experiment-measurement { display: grid; gap: var(--space-2); background: var(--surface-inset); padding: var(--space-6); border-radius: var(--radius-control); }
+.experiment-score { font-variant-numeric: tabular-nums; }
+.experiment-score strong { font-size: var(--type-title-size); }
+.experiment-status-dot { display: inline-block; width: var(--space-3); height: var(--space-3); margin-inline-end: var(--space-3); border-radius: 50%; background: var(--text-secondary); }
+.experiment-status-dot[data-status="completed"] { background: var(--status-success); }
+.experiment-status-dot[data-status="running"] { background: var(--status-info); }
+.experiment-status-dot[data-status="failed"] { background: var(--status-danger); }
+.experiment-detail .experiment-evidence { justify-content: flex-start; text-align: start; }
+.experiment-comparison { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.experiment-comparison :is(td, th) { padding: var(--space-3); text-align: start; overflow-wrap: anywhere; border-bottom: 1px solid var(--border-subtle); }
+
+@container research-panel (min-width: 640px) {
+  .experiment-list { max-block-size: 23rem; }
+  .experiment-detail { border-top: 0; padding-block-start: 0; }
+}

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState, useTransition } from "react";
+import type { KnowledgeReference } from "../project/prior-knowledge/knowledge-reference";
 import type { AgentGitWorkspaceView } from "../agent/synara-runtime";
 import type { TrellisController, TrellisToolKind } from "../trellis/trellis-controller";
 import type { AgentTurnReview } from "./app-synara-embed";
@@ -10,7 +11,7 @@ import { focusHistoryEntry } from "../history/history-focus";
 import { setGetStartedShown } from "../onboarding/get-started-progress";
 
 /** The tool drawers whose open state App itself keeps; comments and literature keep theirs in their own hooks. */
-export type AppToolDrawer = "history" | "git" | "todos" | "checklist" | "start";
+export type AppToolDrawer = "web-knowledge" | "github-knowledge" | "history" | "git" | "todos" | "checklist" | "mind-map" | "formulation" | "prior-knowledge" | "experiments" | "research-progress" | "start";
 
 export type OpenToolOptions = {
   /** Git: show this view of the working tree. */
@@ -21,9 +22,13 @@ export type OpenToolOptions = {
   replyTo?: string;
   /** History: open on this entry of the project's changes (a revision round's). */
   historyEntry?: string;
+  /** Prior Knowledge: inspect an exact finding version. */
+  knowledgeReference?: KnowledgeReference;
+  /** Experiments: inspect this existing journal record. */
+  experimentId?: string;
 };
 
-const CLOSED: Record<AppToolDrawer, boolean> = { history: false, git: false, todos: false, checklist: false, start: false };
+const CLOSED: Record<AppToolDrawer, boolean> = { "web-knowledge": false, "github-knowledge": false, history: false, git: false, todos: false, checklist: false, "mind-map": false, formulation: false, "prior-knowledge": false, experiments: false, "research-progress": false, start: false };
 
 /**
  * The one way App opens a tool drawer, from wherever it is asked for: the
@@ -58,6 +63,12 @@ export function useToolDrawers({ trellis, synara, comments, references, comments
   refreshWordCount: () => Promise<void>;
 }) {
   const [isOpen, setIsOpen] = useState(CLOSED);
+  const [knowledgeReference, selectKnowledge] = useReducer(
+    (_current: KnowledgeReference | null, reference: KnowledgeReference | null) => reference, null,
+  );
+  const [experimentSelection, selectExperiment] = useReducer(
+    (_: { id: string } | undefined, id: string | undefined) => id ? { id } : undefined, undefined,
+  );
   const [gitView, setGitView] = useState<AgentGitWorkspaceView>("changes");
   /**
    * Non-null while the Git drawer is pinned to one agent turn's checkpoint
@@ -80,6 +91,7 @@ export function useToolDrawers({ trellis, synara, comments, references, comments
   const lazyPanelOpen = lazyPanel === "history" ? isOpen.history : commentsOpen;
   const loading = useLoadingShell(opening, lazyPanel !== null && (opening || lazyPanelOpen)) ? lazyPanel : null;
   const close = useCallback((kind: AppToolDrawer | "comments") => {
+    if (kind === "experiments") selectExperiment(undefined);
     setLazyPanel((current) => (current === kind ? null : current));
     if (kind === "comments") closeCommentsPanel();
     else setOpen(kind, false);
@@ -101,12 +113,15 @@ export function useToolDrawers({ trellis, synara, comments, references, comments
           if (options.gitView) setGitView(options.gitView);
         } else if (kind === "history") {
           focusHistoryEntry(options.historyEntry ?? null);
+        } else if (kind === "experiments" && options.experimentId) {
+          selectExperiment(options.experimentId);
         } else if (kind === "todos") {
           void refreshTodos();
         } else if (kind === "checklist") {
           void refreshTodos();
           void refreshWordCount();
         }
+        if (kind === "prior-knowledge" && options.knowledgeReference) selectKnowledge(options.knowledgeReference);
         setOpen(kind, true);
       }
       trellis.revealOpenTool(panel);
@@ -136,6 +151,14 @@ export function useToolDrawers({ trellis, synara, comments, references, comments
   const resetForProject = useCallback(() => {
     setTurnReview(null);
     close("todos");
+    close("web-knowledge");
+    close("github-knowledge");
+    close("mind-map");
+    close("experiments");
+    close("research-progress");
+    close("formulation");
+    close("prior-knowledge");
+    selectKnowledge(null);
     close("start");
   }, [close]);
 
@@ -158,8 +181,8 @@ export function useToolDrawers({ trellis, synara, comments, references, comments
   }, [close, gitOpen, synaraOrigin, sourceControlFrameRef]);
 
   return useMemo(() => ({
-    isOpen, open, close, loading, gitView, turnReview, showGitView, resetForProject,
-  }), [close, gitView, isOpen, loading, open, resetForProject, showGitView, turnReview]);
+    isOpen, open, close, loading, knowledgeReference, gitView, turnReview, showGitView, resetForProject, experimentSelection,
+  }), [close, experimentSelection, gitView, isOpen, knowledgeReference, loading, open, resetForProject, showGitView, turnReview]);
 }
 
 export type ToolDrawers = ReturnType<typeof useToolDrawers>;

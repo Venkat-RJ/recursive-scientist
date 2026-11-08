@@ -37,6 +37,10 @@ pub(crate) enum LiteratureRequest {
     SearchLibrary {
         query: String,
     },
+    SearchWeb { query: String },
+    ListWebSources {},
+    ReadWebSource { id: String },
+    SaveWebSource { source: crate::web_knowledge::SourceInput },
     FetchWebReference {
         url: String,
     },
@@ -110,6 +114,12 @@ impl LiteratureRequest {
             }
             Self::SearchLibrary { query } => {
                 papers::search_library(root, &query).map(|results| json!({ "results": results }))
+            }
+            Self::ListWebSources {} => crate::web_knowledge::list(root),
+            Self::ReadWebSource { id } => to_json(crate::web_knowledge::read(root, &id)),
+            Self::SaveWebSource { source } => to_json(crate::web_knowledge::save(root, source, "agent")),
+            Self::SearchWeb { query } => {
+                crate::firecrawl::search_web(&query).map(|results| json!({ "results": results }))
             }
             Self::FetchWebReference { url } => {
                 to_json(papers::fetch_web_reference(root, &url, &AtomicBool::new(false)))

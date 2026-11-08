@@ -149,10 +149,10 @@ const TOKENS: Record<string, string> = {
 };
 
 /** `focusMode` comes from App, which reads it already: a subscription here would cost a hook on every startup render. */
-type WorkspaceProps = { controller: TrellisController; projectRoot: string; dark: boolean; focusMode: boolean };
+type WorkspaceProps = { controller: TrellisController; projectRoot: string; dark: boolean; focusMode: boolean; research?: boolean };
 
 /** Memoized: App re-renders on every keystroke, and nothing here needs to follow it. */
-const TrellisWorkspace = memo(function TrellisWorkspace({ controller, projectRoot, dark, focusMode }: WorkspaceProps) {
+const TrellisWorkspace = memo(function TrellisWorkspace({ controller, projectRoot, dark, focusMode, research }: WorkspaceProps) {
   // Left to React as it was before its layout commands moved out to
   // trellis-layout-handlers.ts: their try/finally made the compiler skip it,
   // and compiling it changes what its renders memoize, which is a change of
@@ -162,7 +162,7 @@ const TrellisWorkspace = memo(function TrellisWorkspace({ controller, projectRoo
   const { t, i18n } = useLingui();
   const [{ initial, initialPreset, initialFocus, initialWorkspace, initialPlaces, agentMinSize, pdfMinSize }] = useState(() => {
     installTrellisLabels();
-    const saved = openProjectLayout(projectRoot, controller.workspaces);
+    const saved = openProjectLayout(projectRoot, controller.workspaces, research);
     return {
       initial: saved.document,
       initialPreset: saved.preset,

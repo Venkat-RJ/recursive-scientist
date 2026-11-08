@@ -113,6 +113,59 @@ pub(super) fn current_text(path: &Path) -> Result<Option<String>, String> {
     path.exists().then(|| fs::read_to_string(path).map_err(err)).transpose()
 }
 
+const PRIOR_KNOWLEDGE_FILE: &str = "prior-knowledge.json";
+const PRIOR_KNOWLEDGE_LIMIT: u64 = 8 * 1024 * 1024;
+
+pub(crate) fn read_prior_knowledge(root: &Path) -> Result<Option<String>, String> {
+    let path = root.join(PRIOR_KNOWLEDGE_FILE);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= PRIOR_KNOWLEDGE_LIMIT => {
+            super::read_file(root, PRIOR_KNOWLEDGE_FILE).map(Some)
+        }
+        Ok(_) => Err("Prior Knowledge must be a regular file no larger than 8 MiB.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(err(error)),
+    }
+}
+
+pub(crate) fn write_prior_knowledge(
+    root: &Path, expected: Option<String>, content: String,
+) -> Result<(), String> {
+    if content.len() as u64 > PRIOR_KNOWLEDGE_LIMIT {
+        return Err("Prior Knowledge has reached its 8 MiB journal limit.".into());
+    }
+    if read_prior_knowledge(root)? != expected {
+        return Err("Prior Knowledge changed. Read the latest revision before saving.".into());
+    }
+    commit_transaction_changes(
+        root,
+        "Update Prior Knowledge",
+        vec![FileChange {
+            path: PRIOR_KNOWLEDGE_FILE.into(),
+            before: expected,
+            after: Some(content),
+        }],
+        HistoryContext::user("project", "project"),
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn prior_knowledge_creates_atomically_and_rejects_stale_writes() {
+    let fixture = crate::project::test_support::Fixture::empty("prior-knowledge");
+    let root = &fixture.root;
+    let initial = "{\"version\":1,\"events\":[]}\n".to_owned();
+    let updated = initial.trim_end().to_owned();
+    assert_eq!(read_prior_knowledge(root).unwrap(), None);
+    write_prior_knowledge(root, None, initial.clone()).unwrap();
+    assert!(write_prior_knowledge(root, None, updated.clone()).is_err());
+    assert_eq!(read_prior_knowledge(root).unwrap(), Some(initial.clone()));
+    write_prior_knowledge(root, Some(initial.clone()), updated.clone()).unwrap();
+    assert!(write_prior_knowledge(root, Some(initial.clone()), initial).is_err());
+    assert_eq!(read_prior_knowledge(root).unwrap(), Some(updated));
+}
+
 pub fn apply_transaction(
     root: &Path, label: &str, edits: Vec<(String, String)>,
 ) -> Result<Option<TransactionRecord>, String> {

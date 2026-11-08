@@ -149,7 +149,7 @@ body.resizing-panels .resizable-drawer { transition: none; }
 .ui-panel-header-title > .ui-badge { margin-left: var(--space-1); }
 .git-empty { margin: 0; font-size: var(--type-micro-size); color: var(--text-secondary); }
 
-.literature-drawer { width: min(480px, 100%); }
+:is(.literature-drawer, .web-knowledge-drawer, .github-knowledge-drawer) { width: min(480px, 100%); }
 .literature-search {
   display: grid;
   gap: var(--space-4);
@@ -172,6 +172,120 @@ body.resizing-panels .resizable-drawer { transition: none; }
 .literature-count { margin: 0 var(--space-4) var(--space-3); display: flex; flex-wrap: wrap; column-gap: var(--space-4); color: var(--text-secondary); font-size: var(--type-caption-size); line-height: var(--type-caption-line-height); }
 .literature-count-query { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .literature-count-sources { color: var(--text-tertiary); white-space: nowrap; }
+.web-library-views {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  margin-block-end: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-icon);
+}
+.web-library-views > button[aria-pressed="true"] {
+  background: var(--navigation-tree-selected-surface);
+  color: var(--text-primary);
+}
+.web-library-toolbar { justify-content: space-between; align-items: center; row-gap: var(--space-2); }
+.web-library-controls, .web-library-controls > label { display: flex; align-items: center; gap: var(--space-2); }
+.web-library-controls { margin-inline-start: auto; }
+.web-library-controls select {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: var(--space-2);
+  border-radius: var(--radius-compact);
+}
+.web-library-controls select:hover { background: var(--control-hover-surface); }
+:is(.web-knowledge-drawer, .github-knowledge-drawer) .literature-abstract { max-width: var(--focus-mode-measure); white-space: pre-line; }
+/* Papers' icon gutter and compact title/byline become aligned columns at
+   a width that fits the summary and metadata. The preview stays inline. */
+.web-row-grid {
+  --web-row-actions-width: calc(2 * var(--control-size-icon-compact) + var(--space-1));
+  grid-template-columns: 16px minmax(0, 1fr) var(--web-row-actions-width);
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
+  align-items: start;
+}
+.literature-result.web-row-grid { display: grid; }
+.web-source-favicon { width: 14px; height: 14px; object-fit: contain; border-radius: var(--radius-compact); }
+.web-table-head, .web-row-type { display: none; }
+.web-row-grid > :is(.paper-glyph, .web-row-title, .web-row-domain, .web-row-status, .web-row-summary, .web-row-type) { pointer-events: none; }
+.web-row-title {
+  grid-area: 1 / 2;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: var(--type-body-size);
+  line-height: var(--type-subtitle-line-height);
+  font-weight: var(--weight-regular);
+}
+.web-row-grid[data-expanded] .web-row-title { display: block; }
+.web-row-domain {
+  grid-area: 2 / 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-tree-size);
+  line-height: var(--type-tree-line-height);
+}
+.web-row-status { grid-area: 2 / 3; justify-self: end; align-self: center; }
+.web-row-actions {
+  position: relative;
+  grid-area: 1 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+.web-row-collapse { grid-area: 1 / 3; justify-self: end; align-self: center; color: var(--text-tertiary); pointer-events: none; }
+.web-row-grid > :is(.literature-preview, .web-row-summary) { grid-column: 2 / -1; min-width: 0; }
+.web-row-summary, .web-row-type {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-tree-size);
+  line-height: var(--type-tree-line-height);
+}
+.web-row-grid[data-expanded] > .web-row-summary { visibility: hidden; }
+@container literature (min-width: 740px) {
+  .web-row-grid {
+    grid-template-columns: 16px minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, .6fr) minmax(0, .43fr) 42px var(--web-row-actions-width);
+    column-gap: var(--space-4);
+    align-items: center;
+  }
+  .web-row-grid > .web-row-summary { grid-area: 1 / 3; }
+  .web-row-domain { grid-area: 1 / 4; }
+  .web-row-type { grid-area: 1 / 5; display: block; }
+  .web-row-status { grid-area: 1 / 6; justify-self: center; }
+  :is(.web-row-actions, .web-row-collapse) { grid-area: 1 / 7; }
+  .web-row-grid:not([data-expanded]) > .web-row-title { display: block; white-space: nowrap; text-overflow: ellipsis; }
+  .web-row-saved-label { position: absolute; clip-path: inset(50%); }
+  .web-table-head {
+    display: grid;
+    background: var(--surface-input);
+    border-radius: var(--radius-compact);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-1);
+    box-shadow: 0 1px 0 var(--border-subtle);
+  }
+  .web-table-head > span {
+    color: var(--text-secondary);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-line-height);
+  }
+  @media (hover: hover) {
+    .web-row-actions { opacity: 0; transition: opacity var(--motion-fast-exit); }
+    .web-row-grid:is(:hover, :focus-within) > .web-row-actions { opacity: 1; }
+  }
+}
 /* A result reads as a Papers row (app-shell.css): the title in the reading
    face, who and when beneath it with how the work ranks at the end (alphaXiv
    votes, OpenAlex citations), hairlines between rows and the tree's hover

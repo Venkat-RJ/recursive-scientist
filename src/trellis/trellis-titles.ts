@@ -14,8 +14,15 @@ export const PANEL_TITLES: Record<TrellisSingleton, MessageDescriptor> = {
   comments: msg`Annotations`,
   overleaf: msg`Overleaf`,
   literature: msg`Literature`,
+  "web-knowledge": msg`Knowledge from Web`,
+  "github-knowledge": msg`Knowledge from GitHub`,
   todos: msg`TODOs`,
   checklist: msg`Checklist`,
+  "mind-map": msg`Mind Map`,
+  formulation: msg`Problem Formulation`,
+  "prior-knowledge": msg`Prior Knowledge`,
+  experiments: msg`Experiments`,
+  "research-progress": msg`Research Progress`,
   start: msg`Get started`,
 };
 

@@ -1,5 +1,6 @@
 /** Where a link clicked in the visual editor goes: an in-document anchor, a project file, or the web. */
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { parseKnowledgeReference } from "../../project/prior-knowledge/knowledge-reference";
 import { baseArxivId } from "../../papers/arxiv-id";
 import { scrollToTarget } from "./engine/block-window";
 
@@ -103,6 +104,10 @@ export function openMarkdownLink(
     return;
   }
   const path = resolveProjectLink(activePath, href);
-  if (path) onOpenProjectPath?.(path);
+  if (path) {
+    const hash = href.indexOf("#");
+    const reference = hash >= 0 ? path + href.slice(hash) : path;
+    onOpenProjectPath?.(parseKnowledgeReference(reference) ? reference : path);
+  }
   else if (/^(?:https?:|mailto:)/i.test(href)) void openUrl(href).catch(() => undefined);
 }

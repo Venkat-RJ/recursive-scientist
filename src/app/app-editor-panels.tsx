@@ -37,6 +37,7 @@ import type {
   UnusedSymbols,
   WordCount,
 } from "../app-types";
+import { parseKnowledgeReference } from "../project/prior-knowledge/knowledge-reference";
 
 const EMPTY_ITEMS: SubmissionItem[] = [];
 // The checklist loads when it is first opened: its checks and their labels
@@ -45,6 +46,12 @@ const ManuscriptChecklistPanel = lazy(() => import("../project/manuscript-checkl
 const FigureInventoryDialog = lazy(() => import("../project/figure-inventory-dialog").then((module) => ({ default: module.FigureInventoryDialog })));
 // So does the TODO panel: its empty-state drawing alone is ~22 KB of path data.
 const TodoScavengerPanel = lazy(() => import("../project/todo-scavenger-panel").then((module) => ({ default: module.TodoScavengerPanel })));
+
+const FormulationPanel = lazy(() => import("../project/formulation/formulation-panel").then((module) => ({ default: module.FormulationPanel })));
+const PriorKnowledgePanel = lazy(() => import("../project/prior-knowledge/prior-knowledge-panel").then((module) => ({ default: module.PriorKnowledgePanel })));
+const ResearchProgressPanel = lazy(() => import("../project/research-progress/research-progress-panel").then((module) => ({ default: module.ResearchProgressPanel })));
+const ExperimentsPanel = lazy(() => import("../project/experiments/experiments-panel").then((module) => ({ default: module.ExperimentsPanel })));
+const MindMapPanel = lazy(() => import("../project/mind-map-panel").then((module) => ({ default: module.MindMapPanel })));
 
 const EditorCommentsPanel = lazy(() =>
   import("../editor/comments/editor-comments-panel").then((module) => ({ default: module.EditorCommentsPanel })),
@@ -101,7 +108,7 @@ export function AppEditorPanels({ comments, annotationRounds, renderCommentsSurf
   projectWordCount: WordCount | null;
   setProject: Dispatch<SetStateAction<ProjectSnapshot | null>>;
   todoHits: TodoHit[];
-  tools: Pick<ToolDrawers, "isOpen" | "open" | "close" | "loading">;
+  tools: Pick<ToolDrawers, "isOpen" | "open" | "close" | "loading"> & Partial<Pick<ToolDrawers, "experimentSelection" | "knowledgeReference">>;
   unusedSymbols: UnusedSymbols;
 }) {
   const { t } = useLingui();
@@ -109,6 +116,11 @@ export function AppEditorPanels({ comments, annotationRounds, renderCommentsSurf
   const { openProjectFile, project, todoHits, tools, unusedSymbols, activeFile, activeSource } = props;
   const [figureUndo, setFigureUndo] = useProjectFigureUndo(project.root);
   const trellis = useTrellisController();
+  const openResearchEvidence = (path: string, line?: number) => {
+    const knowledgeReference = parseKnowledgeReference(path);
+    if (knowledgeReference) tools.open("prior-knowledge", { knowledgeReference });
+    else void openProjectFile(path, { line });
+  };
   // Another file's last text this session, so its notes keep their lines and sections while it is not in front.
   const sourceFor = (path: string) => path === activeFile ? activeSource : trellis?.texts.get(path);
   // The budgets, the deadline and the items each read the manifest, change it
@@ -231,6 +243,47 @@ export function AppEditorPanels({ comments, annotationRounds, renderCommentsSurf
         onClose={() => setFiguresOpen(false)} beforeWrite={props.beforeFigureWrite} afterWrite={props.afterFigureWrite}
         captureProjectScope={props.captureProjectScope} undo={figureUndo} setUndo={setFigureUndo}
       /></Suspense>}
+      <LazyMount when={tools.isOpen.formulation}>
+        <FormulationPanel
+          key={project.root} root={project.root} onClose={() => tools.close("formulation")}
+          hasNotebook={project.files.some((file) => file.path === "main.md")}
+          openFile={openResearchEvidence} openTool={(kind) => tools.open(kind)}
+          captureProjectScope={props.captureProjectScope}
+        />
+      </LazyMount>
+      <LazyMount when={tools.isOpen["prior-knowledge"]}>
+        <PriorKnowledgePanel
+          key={project.root} root={project.root} onClose={() => tools.close("prior-knowledge")}
+          reference={tools.knowledgeReference}
+          hasNotebook={project.files.some((file) => file.path === "main.md")}
+          openFile={(path, line) => void openProjectFile(path, { line })}
+          openTool={(kind) => {
+            if (kind === "papers") trellis?.showPanel("papers");
+            else tools.open(kind);
+          }}
+          captureProjectScope={props.captureProjectScope}
+        />
+      </LazyMount>
+      <LazyMount when={tools.isOpen["research-progress"]}>
+        <ResearchProgressPanel
+          key={project.root} root={project.root} onClose={() => tools.close("research-progress")}
+          openExperiment={(id) => tools.open("experiments", { experimentId: id })}
+          openTool={(kind) => tools.open(kind)}
+          openFile={(path, line) => void openProjectFile(path, { line })}
+        />
+      </LazyMount>
+      <LazyMount when={tools.isOpen.experiments}>
+        <ExperimentsPanel
+          key={project.root} root={project.root} onClose={() => tools.close("experiments")}
+          selection={tools.experimentSelection}
+          openEvidence={openResearchEvidence} openPriorKnowledge={() => tools.open("prior-knowledge")}
+          captureProjectScope={props.captureProjectScope}
+        />
+      </LazyMount>
+      <LazyMount when={tools.isOpen["mind-map"]}>
+        <MindMapPanel key={project.root} projectRoot={project.root} onClose={() => tools.close("mind-map")}
+          openPriorKnowledge={(knowledgeReference) => tools.open("prior-knowledge", { knowledgeReference })} />
+      </LazyMount>
       <LazyMount when={tools.isOpen.checklist}>
         <ManuscriptChecklistPanel
           data={{

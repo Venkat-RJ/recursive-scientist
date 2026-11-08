@@ -24,6 +24,8 @@ it("offers every bundled template with its edition and starting mode", () => {
   const onVenue = vi.fn();
   const list = openVenues(onVenue);
   expect(list.getAllByRole("option").map((option) => option.textContent)).toEqual([
+    "Scientific Research",
+    "Scheduling Optimization",
     "Blank article",
     "Chinese article (ctexart)",
     "NeurIPS 2026 (preprint)",
@@ -37,6 +39,12 @@ it("offers every bundled template with its edition and starting mode", () => {
   ]);
   fireEvent.click(list.getByRole("option", { name: "Tsinghua University thesis (ThuThesis)" }));
   expect(onVenue).toHaveBeenCalledWith("thuthesis");
+});
+
+it("selects the built-in scheduling template", () => {
+  const onVenue = vi.fn();
+  fireEvent.click(openVenues(onVenue).getByRole("option", { name: "Scheduling Optimization" }));
+  expect(onVenue).toHaveBeenCalledWith("scheduling-optimization");
 });
 
 it("offers the Chinese article beside the blank one", () => {

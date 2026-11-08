@@ -274,6 +274,8 @@ export function useCommandTable({
       run: () => updateCanvasRequest("proofread", { mode, id: crypto.randomUUID() }),
     })),
     { id: "bib", when: inProject, label: t`Add papers`, keywords: t`DOIs, arXiv IDs, links, titles or BibTeX`, group: "research", run: () => referenceImport.openAddSheet() },
+    { id: "discover-web", when: inProject, label: t`Knowledge from Web`, group: "research", run: () => tools.open("web-knowledge") },
+    { id: "discover-github", when: inProject, label: t`Knowledge from GitHub`, group: "research", run: () => tools.open("github-knowledge") },
     // eslint-disable-next-line lingui/no-unlocalized-strings -- the sources' own names, for search only
     { id: "discover", when: inProject, label: t`Discover literature`, keywords: "alphaXiv OpenAlex", group: "research", run: () => tools.open("literature") },
     { id: "check-references", when: inProject, label: t`Check references`, group: "research", run: checkReferences },

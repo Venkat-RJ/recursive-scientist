@@ -48,12 +48,13 @@ function isWindowKey(event: KeyboardEvent): boolean {
   return event.ctrlKey && !event.metaKey && event.key === TERMINAL_TOGGLE_KEY.key;
 }
 
-export function createXtermScreen(): XtermScreen {
+export function createXtermScreen(readOnly = false): XtermScreen {
   const element = document.createElement("div");
   element.className = "terminal-screen";
   const term = new Terminal({
     allowProposedApi: true,
-    cursorBlink: true,
+    cursorBlink: !readOnly,
+    disableStdin: readOnly,
     cursorStyle: "bar",
     scrollback: SCROLLBACK_LINES,
     // ANSI colours a program picks are lifted to 4.5:1 on the ground, so a
@@ -119,6 +120,8 @@ export function createXtermScreen(): XtermScreen {
     cols: () => term.cols,
     rows: () => term.rows,
     write: (data, done) => term.write(data, done),
+    reset: () => term.write("\x1bc"),
+    follow: () => term.scrollToBottom(),
     note: (text) => term.write(`\r\n\x1b[2m${text}\x1b[0m\r\n`),
     onInput: (listener) => {
       term.onData(listener);

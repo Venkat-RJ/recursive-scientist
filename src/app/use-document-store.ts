@@ -99,12 +99,12 @@ export function useDocumentStore(deps: OpenDocumentsDeps) {
   const closedRef = useRef<string[]>([]);
 
   // ---- Canvas mode, and the modes each kind of document returns to.
-  const htmlModesRef = useRef(new Map<string, DocumentViewMode>());
+  const fileViewModesRef = useRef(new Map<string, DocumentViewMode>());
   const documentModeRef = useRef<DocumentViewMode>("split");
   // A bibliography opens as its source until the writer picks its reference list (Preview) or Split.
   const bibModeRef = useRef<DocumentViewMode>("source");
   const viewModes = useCallback((): RememberedViewModes => ({
-    html: htmlModesRef.current, bib: bibModeRef.current, document: documentModeRef.current,
+    files: fileViewModesRef.current, bib: bibModeRef.current, document: documentModeRef.current,
   }), []);
   const viewModeFor = useCallback((path: string) => panelViewMode(path, viewModes()), [viewModes]);
   // Runs before the layout persistence effect (useWorkspaceLayout), which saves the mode recorded here.
@@ -217,7 +217,7 @@ export function useDocumentStore(deps: OpenDocumentsDeps) {
     paperView, setPaperView, paperPath, paperDirty,
     // Tabs, modes, intents, history, restore.
     tabs, setTabs, tabsRef, closedRef, activeTab, assetPaths, revealRequest,
-    mode, setMode, htmlModesRef, documentModeRef, bibModeRef, viewModes, viewModeFor,
+    mode, setMode, fileViewModesRef, documentModeRef, bibModeRef, viewModes, viewModeFor,
     intentRef, viewIntentRef, setOpening,
     setNavStack, setNavIndex, pushNavigation, navLockRef,
     persistenceReadyRoot, setPersistenceReadyRoot, tabsSettledRoot, setTabsSettledRoot,

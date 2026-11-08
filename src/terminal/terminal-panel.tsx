@@ -21,7 +21,7 @@ import type { TrellisController } from "../trellis/trellis-controller";
 import type { TerminalSession } from "./terminal-sessions";
 import type { XtermScreen } from "./terminal-screen";
 import { terminalFontFamily, terminalTheme } from "./terminal-theme";
-import { closeTerminal, findRequests, followProject, openTerminal, terminals } from "./terminal-window";
+import { closeTerminal, findRequests, followProject, openTerminal, revealAgentTerminal, terminals } from "./terminal-window";
 import { TERMINAL_ICON } from "./terminal-icon";
 import { ScreenSlot } from "./terminal-slot";
 import "./terminal.css";
@@ -106,11 +106,11 @@ export function TerminalTab({ session, selected, label }: { session: Session; se
             terminals.select(session.key);
             session.screen.focus();
           }}
-          onDoubleClick={() => setRenaming(true)}
+          onDoubleClick={() => { if (!session.agent) setRenaming(true); }}
           data-terminal-key={session.key}
           tabIndex={selected ? 0 : -1}
           onKeyDown={(event) => {
-            if (event.key === "F2") {
+            if (event.key === "F2" && !session.agent) {
               event.preventDefault();
               setRenaming(true);
               return;
@@ -185,7 +185,7 @@ function FindField({ screen, onClose }: { screen: XtermScreen; onClose: () => vo
 export function TerminalPanel({ controller, shown, focused, moving }: { controller: TrellisController; shown: boolean; focused: boolean; moving: boolean }) {
   const { t } = useLingui();
   const panelRef = useRef<HTMLDivElement>(null);
-  const { sessions, active } = useSyncExternalStore(terminals.subscribe, terminals.get);
+  const { sessions, active, executions, executionId } = useSyncExternalStore(terminals.subscribe, terminals.get);
   const root = useSyncExternalStore(controller.app.subscribe, () => controller.app.get().projectRoot);
   // The terminal whose find field is open (⌘F, or the panel menu's Find).
   const [findingIn, setFindingIn] = useState<number | null>(null);
@@ -206,7 +206,7 @@ export function TerminalPanel({ controller, shown, focused, moving }: { controll
     for (const session of sessions) session.screen.onFindRequest(request);
     return () => { findRequests.delete(request); };
   }, [sessions]);
-  const label = ({ name, number }: Session) => name ?? t`Terminal ${number}`;
+  const label = ({ agent, name, number }: Session) => agent ? t`Agent Terminal` : (name ?? t`Terminal ${number}`);
   if (hosted) {
     return (
       <div ref={panelRef} className="terminal-panel">
@@ -219,16 +219,33 @@ export function TerminalPanel({ controller, shown, focused, moving }: { controll
       </div>
     );
   }
+  const execution = executions.find((entry) => entry.id === executionId);
   const state = current?.state;
   const code = state?.kind === "exited" ? state.code : null;
   const message = state?.kind === "failed" ? state.message : "";
   return (
     <div ref={panelRef} className="terminal-panel">
-      {sessions.length > 1 && (
+      {(sessions.length > 1 || sessions[0]?.agent) && (
         <div className="terminal-tabs" role="tablist" aria-label={t`Terminals`}>
           {sessions.map((session) => (
             <TerminalTab key={session.key} session={session} selected={session.key === active} label={label(session)} />
           ))}
+        </div>
+      )}
+      {current?.agent && (
+        <div className="agent-terminal-controls">
+          <select aria-label={t`Agent executions`} value={executionId ?? ""} onChange={(event) => terminals.revealAgentExecution(event.target.value)}>
+            {executions.map((entry) => (
+              <option key={entry.id} value={entry.id}>{entry.startedAt ? `${new Date(entry.startedAt).toLocaleString()} · ` : ""}{entry.command.slice(0, 120)}</option>
+            ))}
+          </select>
+          {execution?.provider && <span title={execution.cwd}>{execution.provider}</span>}
+          <Button size="compact" variant="secondary" onClick={() => current.screen.follow?.()}>{t`Follow output`}</Button>
+        </div>
+      )}
+      {!sessions.some((session) => session.agent) && executions.length > 0 && (
+        <div className="agent-terminal-controls">
+          <Button size="compact" variant="secondary" onClick={revealAgentTerminal}>{t`Agent executions`}</Button>
         </div>
       )}
       <div className="terminal-stage">

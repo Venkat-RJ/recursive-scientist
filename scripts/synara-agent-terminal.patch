@@ -1,0 +1,494 @@
+--- a/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
++++ b/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
+@@ -1455,6 +1455,7 @@
+         const existingText = existing?.text ?? "";
+         const truncated = existingText.length + delta.length > MAX_BUFFERED_TOOL_OUTPUT_CHARS;
+         return Cache.set(bufferedToolOutputByKey, key, {
++          ...existing,
+           text: appendCappedBufferedText(existingText, delta, MAX_BUFFERED_TOOL_OUTPUT_CHARS),
+           truncated: existing?.truncated === true || truncated,
+           appliedThroughSequence: sequence,
+@@ -3353,6 +3354,40 @@
+         event.payload.delta.length > 0
+       ) {
+         yield* appendBufferedToolOutput(toolOutputKey, event.payload.delta, runtimeSequence);
++      }
++
++      if (
++        toolOutputKey &&
++        event.itemId &&
++        event.turnId &&
++        event.type === "content.delta" &&
++        event.payload.streamKind === "command_output" &&
++        !suppressProgressActivity &&
++        !rebuildAcceptedProgress
++      ) {
++        const buffer = yield* getBufferedToolOutput(toolOutputKey);
++        // The journal batches previews while retaining every raw output delta.
++        if (buffer) {
++          const preview: ProviderRuntimeEvent = {
++            ...event,
++            type: "item.updated",
++            payload: {
++              itemType: "command_execution",
++              status: "inProgress",
++              title: "Ran command",
++              data: {
++                item: { id: event.itemId },
++                rawOutput: {
++                  output: buffer.text.slice(0, 8000),
++                  truncated: buffer.truncated || buffer.text.length > 8000,
++                },
++              },
++            },
++          };
++          for (const activity of projectProviderRuntimeActivities(preview, runtimeSequence)) {
++            yield* dispatchActivityUpdate(preview, thread.id, activity);
++          }
++        }
+       }
+ 
+       const reasoningSummaryKey = reasoningSummaryBufferKey(event, thread.id);
+--- a/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts
++++ b/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts
+@@ -8099,6 +8099,14 @@
+         delta: "first line\n",
+       },
+     });
++    const liveThread = await waitForThread(harness.engine, (entry) =>
++      entry.activities.some((activity) => activity.kind === "tool.updated"),
++    );
++    expect(
++      liveThread.activities.find((entry) => entry.kind === "tool.updated")?.payload,
++    ).toMatchObject({ data: { rawOutput: { output: "first line\n" } } });
++    expect(liveThread.activities.some((entry) => entry.kind === "tool.completed")).toBe(false);
++
+     harness.emit({
+       type: "content.delta",
+       eventId: asEventId("evt-command-output-2"),
+--- a/apps/server/src/orchestration/providerRuntimeActivityProjection.ts
++++ b/apps/server/src/orchestration/providerRuntimeActivityProjection.ts
+@@ -1263,6 +1263,7 @@
+               : (itemTitle ?? (event.type === "item.completed" ? "Tool" : "Tool updated")),
+           payload: toActivityPayload({
+             itemType: event.payload.itemType,
++            ...(event.payload.itemType === "command_execution" ? { provider: event.provider } : {}),
+             ...(event.payload.status ? { status: event.payload.status } : {}),
+             ...(itemTitle ? { title: itemTitle } : {}),
+             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+--- a/apps/server/src/orchestration/providerRuntimeProgressCoalescing.ts
++++ b/apps/server/src/orchestration/providerRuntimeProgressCoalescing.ts
+@@ -3,14 +3,19 @@
+ export const PROVIDER_RUNTIME_PROGRESS_WINDOW_MS = 50;
+ 
+ /**
+- * Only complete snapshots qualify: in-progress tool snapshots and the
++ * Only replaceable projections qualify: in-progress tool snapshots and the
+  * cumulative turn diff (one per (thread, turn); Codex resends the whole diff on
+  * every patch). task.progress can append workflow agent phases or
+- * noncumulative reasoning sections, so it is always lossless.
++ * noncumulative reasoning sections, so it is always lossless. Command deltas
++ * are all buffered by ingestion; only their cumulative preview is coalesced.
+  */
+ export function providerRuntimeProgressKey(event: ProviderRuntimeEvent): string | undefined {
+   let identity: string | undefined;
+   switch (event.type) {
++    case "content.delta":
++      if (event.payload.streamKind !== "command_output") return undefined;
++      identity = event.itemId;
++      break;
+     case "turn.diff.updated":
+       identity = event.turnId;
+       break;
+--- a/apps/web/src/components/ChatView.tsx
++++ b/apps/web/src/components/ChatView.tsx
+@@ -180,6 +180,7 @@
+ import { useHandleNewChat } from "../hooks/useHandleNewChat";
+ import { useHandleNewThread } from "../hooks/useHandleNewThread";
+ import { useLatticeComposerPrompt } from "./chat/useLatticeComposerPrompt";
++import { useLatticeAgentTerminal } from "./chat/useLatticeAgentTerminal";
+ import { useLatticeTurnActivity } from "./chat/useLatticeTurnActivity";
+ import { useUnavailableModelFallback } from "./chat/useUnavailableModelFallback";
+ import { ComposerClaudeNotice } from "./chat/ComposerClaudeNotice";
+@@ -5262,6 +5263,7 @@
+     },
+     workLogEntries,
+   });
++  useLatticeAgentTerminal(isEmbed && !isInactiveSplitPane, activeProject?.cwd ?? null);
+   // The prompt a follow-up chip last wrote: choosing another chip replaces it
+   // while it is untouched, and anything the user typed is kept.
+   const followUpDraftRef = useRef<string | null>(null);
+diff --git a/apps/web/src/components/chat/useLatticeAgentTerminal.ts b/apps/web/src/components/chat/useLatticeAgentTerminal.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/components/chat/useLatticeAgentTerminal.ts
+@@ -0,0 +1,176 @@
++import { ThreadId } from "@synara/contracts";
++import { useEffect } from "react";
++
++import { embedWorkspaceMatches, readEmbedMode } from "../../embedMode";
++import { useStore } from "../../store";
++import { getThreadFromState } from "../../threadDerivation";
++import { retainThreadDetailSubscription } from "../../threadDetailSubscriptionRetention";
++import type { Thread } from "../../types";
++import { deriveWorkLogEntries, type WorkLogEntry } from "../../workLog";
++
++const RECENT_THREADS = 6;
++const RECENT_EXECUTIONS = 40;
++const OUTPUT_LIMIT = 32768;
++
++function executionRecord(thread: Thread, entry: WorkLogEntry, reveal = false) {
++  const command = entry.rawCommand ?? entry.toolDetails?.command ?? entry.command;
++  if (entry.itemType !== "command_execution" || !entry.toolCallId || !command) return null;
++  const provider =
++    entry.toolDetails?.provider ?? thread.session?.provider ?? thread.modelSelection.provider;
++  // Codex item IDs and Claude tool-use IDs are unique within a conversation.
++  if (provider !== "codex" && provider !== "claudeAgent") return null;
++  const lifecycle = entry.executionStatus ?? entry.toolStatus;
++  if (
++    lifecycle !== "running" &&
++    lifecycle !== "completed" &&
++    lifecycle !== "failed" &&
++    lifecycle !== "cancelled"
++  )
++    return null;
++  const details = entry.toolDetails?.output;
++  const exitCode = details?.exitCode ?? null;
++  const interrupted =
++    (thread.latestTurn?.turnId === entry.turnId && thread.latestTurn?.state === "interrupted") ||
++    thread.activities.some(
++      (activity) => activity.kind === "turn.aborted" && activity.turnId === entry.turnId,
++    );
++  const status =
++    lifecycle === "running" &&
++    (interrupted ||
++      !thread.session ||
++      thread.session.status === "closed" ||
++      thread.session.status === "error" ||
++      thread.session.orchestrationStatus === "stopped" ||
++      thread.session.orchestrationStatus === "interrupted")
++      ? "unknown"
++      : lifecycle;
++  const output = details?.output ?? [details?.stdout, details?.stderr].filter(Boolean).join("\n");
++  return {
++    id: JSON.stringify([thread.id, entry.toolCallId]),
++    threadId: thread.id,
++    turnId: entry.turnId,
++    provider,
++    cwd: entry.toolDetails?.cwd,
++    command: command.slice(0, 4096),
++    output: output.slice(0, OUTPUT_LIMIT),
++    stdout: details?.stdout?.slice(0, OUTPUT_LIMIT),
++    stderr: details?.stderr?.slice(0, OUTPUT_LIMIT),
++    startedAt: entry.liveActivity?.startedAt ?? entry.createdAt,
++    completedAt: lifecycle === "running" ? undefined : entry.liveActivity?.lastActivityAt,
++    status,
++    exitCode,
++    truncated: Boolean(details?.truncated || output.length > OUTPUT_LIMIT),
++    reveal,
++  };
++}
++
++function postExecution(
++  config: NonNullable<ReturnType<typeof readEmbedMode>>,
++  record: NonNullable<ReturnType<typeof executionRecord>>,
++) {
++  if (!config.hostOrigin) return;
++  window.parent.postMessage(
++    {
++      type: "synara:agent-terminal",
++      workspaceRoot: config.workspaceRoot,
++      ...record,
++    },
++    config.hostOrigin,
++  );
++}
++
++export function latticeExecutionAction(threadId: string | null | undefined, entry: WorkLogEntry) {
++  if (!threadId || !entry.toolCallId || entry.itemType !== "command_execution") return undefined;
++  const config = readEmbedMode();
++  if (!config?.hostOrigin || config.surface !== "chrome") return undefined;
++  const state = useStore.getState();
++  const thread = getThreadFromState(state, ThreadId.makeUnsafe(threadId));
++  const project = state.projects.find((candidate) => candidate.id === thread?.projectId);
++  if (!thread || !embedWorkspaceMatches(config, project?.cwd)) return undefined;
++  const record = executionRecord(thread, entry, true);
++  return record ? { record, open: () => postExecution(config, record) } : undefined;
++}
++
++/** Read Synara's durable tool activities, including for recently visited and running chats. */
++export function useLatticeAgentTerminal(enabled: boolean, projectCwd: string | null) {
++  useEffect(() => {
++    const config = enabled ? readEmbedMode() : null;
++    if (
++      !config?.hostOrigin ||
++      config.surface !== "chrome" ||
++      !embedWorkspaceMatches(config, projectCwd)
++    )
++      return;
++    const subscriptions = new Map<ThreadId, () => void>();
++    const sent = new Map<string, string>();
++    const previousThreads = new Map<ThreadId, Thread>();
++    let scheduled = false;
++    let disposed = false;
++    const sync = () => {
++      scheduled = false;
++      if (disposed) return;
++      const state = useStore.getState();
++      const projectIds = new Set(
++        state.projects
++          .filter((project) => embedWorkspaceMatches(config, project.cwd))
++          .map((project) => project.id),
++      );
++      const threads = Object.values(state.threadShellById ?? {})
++        .filter((thread) => projectIds.has(thread.projectId))
++        .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
++      const retain = new Set(threads.slice(0, RECENT_THREADS).map((thread) => thread.id));
++      for (const thread of threads) {
++        if (state.threadSessionById?.[thread.id]?.activeTurnId) retain.add(thread.id);
++      }
++      for (const [id, release] of subscriptions) {
++        if (retain.has(id)) continue;
++        release();
++        subscriptions.delete(id);
++        previousThreads.delete(id);
++      }
++      for (const id of retain) {
++        if (!subscriptions.has(id)) subscriptions.set(id, retainThreadDetailSubscription(id));
++        const thread = getThreadFromState(state, id);
++        if (!thread || previousThreads.get(id) === thread) continue;
++        previousThreads.set(id, thread);
++        const activities = thread.activities.filter(
++          (activity) =>
++            activity.kind === "tool.started" ||
++            activity.kind === "tool.updated" ||
++            activity.kind === "tool.completed",
++        );
++        const visibleTurnIds = new Set(
++          activities.flatMap((activity) => (activity.turnId ? [activity.turnId] : [])),
++        );
++        const entries = deriveWorkLogEntries(activities, undefined, { visibleTurnIds })
++          .filter((entry) => entry.itemType === "command_execution")
++          .slice(-RECENT_EXECUTIONS);
++        for (const entry of entries) {
++          const record = executionRecord(thread, entry);
++          if (!record) continue;
++          const fingerprint = JSON.stringify(record);
++          if (sent.get(record.id) === fingerprint) continue;
++          sent.delete(record.id);
++          sent.set(record.id, fingerprint);
++          postExecution(config, record);
++        }
++      }
++      while (sent.size > RECENT_THREADS * RECENT_EXECUTIONS) {
++        const oldest = sent.keys().next().value;
++        if (oldest === undefined) break;
++        sent.delete(oldest);
++      }
++    };
++    const unsubscribe = useStore.subscribe(() => {
++      if (scheduled) return;
++      scheduled = true;
++      queueMicrotask(sync);
++    });
++    sync();
++    return () => {
++      disposed = true;
++      unsubscribe();
++      for (const release of subscriptions.values()) release();
++    };
++  }, [enabled, projectCwd]);
++}
+--- a/apps/web/src/components/chat/TimelineWorkEntryRow.tsx
++++ b/apps/web/src/components/chat/TimelineWorkEntryRow.tsx
+@@ -1,3 +1,4 @@
++import { latticeExecutionAction } from "./useLatticeAgentTerminal";
+ // FILE: TimelineWorkEntryRow.tsx
+ // Purpose: Renders transcript work/tool rows and their inline details.
+ // Layer: Web chat presentation component
+@@ -795,6 +796,7 @@
+     onEnableComputerControl,
+     timestampFormat,
+   } = props;
++  const openExecution = latticeExecutionAction(threadId, workEntry);
+   const textFontSizePx = textFontSizePxProp ?? chatMetaFontSizePx;
+   const density = densityProp ?? "default";
+   const compact = density === "compact";
+@@ -1148,6 +1150,32 @@
+               </div>
+             </>
+           );
++          if (openExecution) {
++            return (
++              <AgentActivityOpenSurface
++                canOpen
++                compact={compact}
++                onOpen={openExecution.open}
++                dataToolDetailTrigger
++                tooltip={toolRowTooltipContent(rawCommand, displayText, displayText)}
++              >
++                <span className="flex min-w-0 items-center gap-2 text-ui-sm text-muted-foreground">
++                  {renderWorkEntryIcon(EntryIcon, "size-3.5 shrink-0")}
++                  <span className="truncate font-chat-code">{openExecution.record.command}</span>
++                  <span
++                    className={cn(
++                      "shrink-0",
++                      openExecution.record.status === "failed" && "text-destructive",
++                    )}
++                  >
++                    {openExecution.record.exitCode === null
++                      ? openExecution.record.status
++                      : `${openExecution.record.status} · ${openExecution.record.exitCode}`}
++                  </span>
++                </span>
++              </AgentActivityOpenSurface>
++            );
++          }
+           if (canOpenToolDetails) {
+             return (
+               <ToolDetailsDisclosure
+--- a/apps/web/src/workLog.ts
++++ b/apps/web/src/workLog.ts
+@@ -174,6 +174,8 @@
+   mcpServer?: string;
+   toolCallId?: string;
+   toolStatus?: SynaraMcpToolStatus;
++  /** Provider-reported command status before chat reconciles its display at turn end. */
++  executionStatus?: SynaraMcpToolStatus;
+   liveActivity?: WorkLogLiveActivity;
+   toolDetails?: WorkLogToolDetails;
+   itemType?: ToolLifecycleItemType;
+@@ -2239,6 +2241,19 @@
+   });
+   if (toolDetails) {
+     entry.toolDetails = toolDetails;
++    if (
++      itemType === "command_execution" &&
++      activity.kind === "tool.completed" &&
++      toolStatus === "completed" &&
++      toolDetails.output?.exitCode != null &&
++      toolDetails.output.exitCode !== 0
++    ) {
++      entry.toolStatus = "failed";
++      if (entry.liveActivity) entry.liveActivity = { ...entry.liveActivity, state: "failed" };
++    }
++  }
++  if (itemType === "command_execution" && entry.toolCallId && entry.toolStatus) {
++    entry.executionStatus = entry.toolStatus;
+   }
+   const collapseKey =
+     deriveProviderRuntimeReconciliationCollapseKey(activity, payload) ??
+@@ -2777,6 +2792,9 @@
+     ...(toolName ? { toolName } : {}),
+     ...(mcpServer ? { mcpServer } : {}),
+     ...(toolCallId ? { toolCallId } : {}),
++    ...(itemType === "command_execution" && toolCallId && toolStatus
++      ? { executionStatus: toolStatus }
++      : {}),
+     ...(toolStatus ? { toolStatus } : {}),
+     ...(liveActivity ? { liveActivity } : {}),
+     ...(toolDetails ? { toolDetails } : {}),
+--- a/apps/web/src/workLog.test.ts
++++ b/apps/web/src/workLog.test.ts
+@@ -14,6 +14,42 @@
+ import { makeActivity } from "./storeTestFixtures";
+ import { isComputerToolName } from "./lib/computerToolPresentation";
+ import { isPlainRuntimeNoticeWorkEntry } from "./components/chat/agentActivity.logic";
++
++it("keeps provider command status separate from the chat turn status", () => {
++  const turnId = TurnId.makeUnsafe("origin");
++  const start = makeActivity({
++    id: "start",
++    turnId,
++    kind: "tool.started",
++    payload: {
++      itemType: "command_execution",
++      status: "inProgress",
++      data: { item: { id: "execution", command: "exit 3" } },
++    },
++  });
++  const end = makeActivity({
++    id: "end",
++    turnId,
++    kind: "tool.completed",
++    createdAt: "2026-10-10T00:00:10Z",
++    payload: {
++      itemType: "command_execution",
++      status: "completed",
++      data: { item: { id: "execution", command: "exit 3", exitCode: 3 } },
++    },
++  });
++  const options = {
++    activeTurnId: null,
++    latestTurnState: "completed" as const,
++    latestTurnCompletedAt: "2026-10-10T00:00:05Z",
++  };
++  expect(deriveWorkLogEntries([start], turnId, options)).toMatchObject([
++    { executionStatus: "running" },
++  ]);
++  expect(deriveWorkLogEntries([start, end], turnId, options)).toMatchObject([
++    { executionStatus: "failed", toolDetails: { output: { exitCode: 3 } } },
++  ]);
++});
+ 
+ describe("deriveSubagentTaskEnds", () => {
+   it("preserves settled invocations while a resumed task waits for its own completion", () => {
+--- a/apps/web/src/lib/toolCallDetails.ts
++++ b/apps/web/src/lib/toolCallDetails.ts
+@@ -27,6 +27,8 @@
+   kind: "command" | "file-change";
+   title: string;
+   command?: string;
++  cwd?: string;
++  provider?: string;
+   output?: WorkLogToolOutputDetails;
+   diff?: string;
+   content?: string;
+@@ -158,6 +160,7 @@
+   );
+   let output = outputText(
+     firstOutputText(
++      item?.aggregatedOutput,
+       rawOutput?.output,
+       rawOutput?.content,
+       data?.output,
+@@ -183,6 +186,7 @@
+     rawOutput?.exitCode,
+     rawOutput?.code,
+     data?.exitCode,
++    item?.exitCode,
+     itemResult?.exitCode,
+     result?.exitCode,
+     outputExitCode(input.detail),
+@@ -359,6 +363,7 @@
+       return undefined;
+     }
+     return {
++      ...commandMetadata(input.payload),
+       kind: "command",
+       title: detailsTitle(input),
+       ...(command ? { command } : {}),
+@@ -416,6 +421,14 @@
+   };
+ }
+ 
++function commandMetadata(payload: Record<string, unknown> | null) {
++  const data = asRecord(payload?.data);
++  const item = asRecord(data?.item);
++  const cwd = firstString(item?.cwd, data?.cwd);
++  const provider = firstString(payload?.provider);
++  return { ...(cwd ? { cwd } : {}), ...(provider ? { provider } : {}) };
++}
++
+ export function mergeWorkLogToolDetails(
+   left: WorkLogToolDetails | undefined,
+   right: WorkLogToolDetails | undefined,
+@@ -428,6 +441,8 @@
+   return {
+     kind: right.kind,
+     title: right.title || left.title,
++    ...((right.cwd ?? left.cwd) ? { cwd: right.cwd ?? left.cwd } : {}),
++    ...((right.provider ?? left.provider) ? { provider: right.provider ?? left.provider } : {}),
+     ...((right.command ?? left.command) ? { command: right.command ?? left.command } : {}),
+     ...(output ? { output } : {}),
+     ...((right.diff ?? left.diff) ? { diff: right.diff ?? left.diff } : {}),

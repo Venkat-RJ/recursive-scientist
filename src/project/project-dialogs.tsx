@@ -172,6 +172,8 @@ export function CreateProjectDialog(props: {
               <SelectValue placeholder={t`Choose a built-in template`} />
             </SelectTrigger>
             <SelectContent className="venue-picker-content" position="popper" align="start">
+              <SelectItem value="scientific-research">{t`Scientific Research`}</SelectItem>
+              <SelectItem value="scheduling-optimization">{t`Scheduling Optimization`}</SelectItem>
               <SelectItem value="blank">{t`Blank article`}</SelectItem>
               <SelectItem value="chinese-article">{t`Chinese article (ctexart)`}</SelectItem>
               {PROJECT_VENUES.map(({ id, label: name, edition, preprint }) => (

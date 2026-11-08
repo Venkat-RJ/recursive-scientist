@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { DocumentViewMode, OpenFileOptions } from "../app-types";
-import { arxivIdFromTabKey, isBibFilePath, isHtmlFilePath, isPaperTabKey, paperTabKey, stripFrontmatter } from "../app-utils";
-import { withEditor, withPdf } from "./document-view-modes";
+import { arxivIdFromTabKey, isBibFilePath, isPaperTabKey, paperTabKey, stripFrontmatter } from "../app-utils";
+import { hasPerFileViewMode, withEditor, withPdf } from "./document-view-modes";
 import { claimGenerations, documentKind, ownerOf, type LoadFile, type OpenClaim } from "./open-document-intents";
 import { useDocumentAutosave } from "./use-document-autosave";
 import { useDocumentDiskSync } from "./use-document-disk-sync";
@@ -47,7 +47,7 @@ export function useOpenDocuments(deps: OpenDocumentsDeps) {
     file, fileRef, text, textRef, setText, savedText, savedRef, asset, assetRef, setAsset,
     paper, paperView, paperPath, paperDirty, paperBlog, paperMarkdown, setPaperText,
     tabs, setTabs, tabsRef, closedRef, activeTab, assetPaths, revealRequest,
-    mode, setMode, htmlModesRef, documentModeRef, bibModeRef, viewModeFor,
+    mode, setMode, fileViewModesRef, documentModeRef, bibModeRef, viewModeFor,
     intentRef, viewIntentRef, setOpening, setNavIndex, navLockRef,
     persistenceReadyRoot, tabsSettledRoot, flushRef, captureViewportRef, viewStates, vanishedRef,
     showFileText, closePaper, paperBuffersDirty, addTab, flush, bufferText, flushAndCheckDirty, recordDiskVersion, accept, isOutsideText,
@@ -184,7 +184,7 @@ export function useOpenDocuments(deps: OpenDocumentsDeps) {
         setMode(next);
         return;
       }
-      if (isHtmlFilePath(activeFile)) htmlModesRef.current.set(activeFile, next);
+      if (hasPerFileViewMode(activeFile)) fileViewModesRef.current.set(activeFile, next);
       else if (isBibFilePath(activeFile)) bibModeRef.current = next;
       else documentModeRef.current = next;
       setAsset(null);
@@ -197,7 +197,7 @@ export function useOpenDocuments(deps: OpenDocumentsDeps) {
       setMode(next);
     })();
   }, [
-    addTab, bibModeRef, captureViewportRef, closePaper, documentModeRef, flushRef, htmlModesRef, intentRef, renderedRef,
+    addTab, bibModeRef, captureViewportRef, closePaper, documentModeRef, flushRef, fileViewModesRef, intentRef, renderedRef,
     save, setAsset, setMode, viewIntentRef,
   ]);
 

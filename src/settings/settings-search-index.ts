@@ -75,6 +75,7 @@ export function useSettingsSearchIndex(hasProject: boolean, knownAuthorName: str
     { tab: "editor", place: editor, id: "version", label: t`Version`, terms: t`Check for updates` },
     // The Providers page also holds Default provider, the provider new chats start on.
     { tab: "agent", label: t`Providers`, place: t`Agent`, terms: t`Default provider` },
+    { tab: "agent-behavior", label: t`Fold finished turns`, place: t`Behavior`, id: "setting-fold-finished-turns", terms: t`Show agent activity and tool calls` },
     { tab: "mcp", label: t`MCP`, place: t`Agent` },
     { tab: "api", label: t`Skills`, place: t`Agent` },
     { tab: "usage", label: t`Usage & limits`, place: t`Agent`, terms: t({ message: "quota credits rate limit refresh", comment: "Search words for the agent Usage & limits settings page, space-separated" }) },

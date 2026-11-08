@@ -22,11 +22,11 @@ pub struct ScrapedPage {
 }
 
 #[derive(Deserialize)]
-struct ScrapeResponse {
+struct FirecrawlResponse {
     #[serde(default)]
     success: bool,
     #[serde(default)]
-    data: Option<ScrapeData>,
+    data: Option<serde_json::Value>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -51,26 +51,66 @@ struct ScrapeMetadata {
 
 fn api_key() -> Result<String, String> {
     crate::literature_credentials::firecrawl_key()?.ok_or_else(|| {
-        "Webpage import needs a Firecrawl API key. Add one in Settings → Literature services (this build has no shared key).".to_string()
+        "Web search and webpage import need a Firecrawl API key. Add one in Settings → Literature services (this build has no shared key).".to_string()
     })
 }
 
-/// Scrape one page to markdown. Retries 429s, translates quota and
-/// concurrency limits into messages a user can act on.
+#[derive(Deserialize, serde::Serialize)]
+pub struct WebHit {
+    url: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SearchData {
+    #[serde(default)]
+    web: Vec<WebHit>,
+}
+
+pub fn search_web(query: &str) -> Result<Vec<WebHit>, String> {
+    let query = query.trim();
+    if query.is_empty() || query.chars().count() > 400 {
+        return Err("Use a web query between 1 and 400 characters.".into());
+    }
+    let response = request(
+        "https://api.firecrawl.dev/v2/search",
+        serde_json::json!({ "query": query, "sources": ["web"], "limit": 12 }),
+        "search the web",
+    )?;
+    let data: SearchData = serde_json::from_value(response)
+        .map_err(|_| "Firecrawl returned unreadable web results.".to_string())?;
+    Ok(data.web.into_iter().filter(|hit| {
+        hit.url.len() <= 1024 && reqwest::Url::parse(&hit.url).is_ok_and(|url| {
+            matches!(url.scheme(), "http" | "https") && url.has_host()
+                && url.username().is_empty() && url.password().is_none()
+        })
+    }).take(12).collect())
+}
+
+/// Scrape one page to markdown.
 pub fn scrape(url: &str) -> Result<ScrapedPage, String> {
+    let data = request(SCRAPE_URL, serde_json::json!({
+        "url": url,
+        "formats": ["markdown", "rawHtml"],
+        "onlyMainContent": true,
+    }), "scrape the page")?;
+    let data = serde_json::from_value(data)
+        .map_err(|_| "Firecrawl returned unreadable page content.".to_string())?;
+    scraped_page(data).map_err(|error| format!("{error} Source: {url}"))
+}
+
+fn request(endpoint: &str, body: serde_json::Value, operation: &str) -> Result<serde_json::Value, String> {
     let key = api_key()?;
     let client = crate::http::blocking(std::time::Duration::from_secs(120))
         .build()
         .map_err(|error| format!("Could not create the Firecrawl client: {error}"))?;
-    let body = serde_json::json!({
-        "url": url,
-        "formats": ["markdown", "rawHtml"],
-        "onlyMainContent": true,
-    });
     let mut attempt = 0usize;
     loop {
         let response = client
-            .post(SCRAPE_URL)
+            .post(endpoint)
             .bearer_auth(&key)
             .json(&body)
             .send()
@@ -92,21 +132,19 @@ pub fn scrape(url: &str) -> Result<ScrapedPage, String> {
         if let Some(refusal) = refusal {
             return Err(refusal.to_string());
         }
-        let parsed: ScrapeResponse = response
+        let parsed: FirecrawlResponse = response
             .json()
             .map_err(|error| format!("Firecrawl returned an unreadable response: {error}"))?;
-        if !parsed.success {
+        if !parsed.success || status >= 400 {
             return Err(format!(
-                "Firecrawl could not scrape the page: {}",
+                "Firecrawl could not {operation}: {}",
                 parsed
                     .error
                     .unwrap_or_else(|| format!("HTTP {status}"))
                     .replace(&key, "[redacted]")
             ));
         }
-        let data =
-            parsed.data.ok_or_else(|| "Firecrawl reported success with no content.".to_string())?;
-        return scraped_page(data).map_err(|error| format!("{error} Source: {url}"));
+        return parsed.data.ok_or_else(|| "Firecrawl reported success with no content.".to_string());
     }
 }
 

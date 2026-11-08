@@ -98,11 +98,11 @@ describe("paper reads", () => {
     await expectInvoked("read_paper", { arxivId: "2407.06438" });
     expect(await screen.findByText("Opening Delayed paper…", { selector: ".loading-announcement" })).toBeInTheDocument();
     fireEvent.click(await findProjectTreeItem("notes.md"));
-    await waitFor(() => expect(paneContent("primary")).toHaveTextContent("content:notes.md"));
+    expect(await screen.findByRole("textbox", { name: "Markdown document editor" })).toHaveTextContent("content:notes.md");
     expect(screen.queryByText("Opening Delayed paper…")).toBeNull();
     act(() => paperRead.resolve("# Paper must stay closed"));
     await act(async () => { await Promise.resolve(); });
-    expect(paneContent("primary")).toHaveTextContent("content:notes.md");
+    expect(screen.getByRole("textbox", { name: "Markdown document editor" })).toHaveTextContent("content:notes.md");
     expect(screen.getByRole("tab", { name: /notes\.md/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("heading", { name: "Paper must stay closed" })).toBeNull();
   });

@@ -131,7 +131,7 @@ since the read-only phase-one catalog:
 - **Browser control is out.** The `browser_*` tools have no alias and are not in the allowlist, so
   the embedded-browser surface never reaches the Lattice catalog.
 
-`LATTICE_NATIVE_TOOL_NAMES` is an allowlist of **33** names that pass the filter *without* being
+`LATTICE_NATIVE_TOOL_NAMES` is an allowlist of names that pass the filter *without* being
 renamed. They are not all Lattice code:
 
 | Group | Count | Names | Implemented by |
@@ -294,6 +294,57 @@ not be interpreted as a complete account of a provider's cache behavior.
 `sourceDirectory` (the default checkout location, which moves with the branch) and `nodeVersion`.
 Read values from it — every script and workflow does, and hardcoding any of them is how this document
 went stale before.
+
+The local Agent Terminal uses the Synara changes in
+[`scripts/synara-agent-terminal.patch`](../scripts/synara-agent-terminal.patch).
+On a fresh checkout of the pinned Synara revision, apply the patch before
+building and restart the agent from **Settings → Environment** after staging.
+
+```sh
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-agent-terminal.patch"
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-mind-map-tools.patch"
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-experiments-tools.patch"
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-formulation-tools.patch"
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-prior-knowledge-tools.patch"
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-research-panel-tools.patch"
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-web-knowledge-tools.patch"
+git -C "$SYNARA_SOURCE_DIR" apply "$PWD/scripts/synara-agent-web-search.patch"
+pnpm prepare:synara:dev
+```
+
+The agent can use `set_research_panel` with `show` or `close` for Problem
+Formulation, Prior Knowledge, Mind Map, Experiments, Research Progress, and
+Knowledge from Web (`web-knowledge`).
+The agent can show a relevant panel when presenting a result. Routine data
+reads leave the layout alone. The tool only operates on the active project.
+
+Open Knowledge from Web from the Papers toolbar. It docks as a tab beside
+Papers and Literature. Keyword searches use the configured agent through the
+existing orchestration runner without navigating the conversation or composer.
+The panel displays results after the agent uses its web-search tool. Completed
+search tasks are archived automatically.
+Select a result to preview it. Save source and Read in Lattice ask the configured
+agent to read the page, then persist source excerpts and separate agent notes.
+Search snippets cannot be saved as source content. Saved captures reopen in
+Lattice's native Markdown reader without fetching the page again.
+
+The UI and the agent's `list_web_sources`, `read_web_source`, and
+`save_web_source` tools share `.research/web` within the project. Each capture
+has a versioned JSON record and a readable Markdown file. Repeated captures
+retain previous evidence; the library lists the latest capture for each URL.
+File watching refreshes the panel when an agent saves a source. Web sources
+do not enter the paper bibliography or require Prior Knowledge. The optional
+Firecrawl tools remain available, but agent retrieval needs no Firecrawl key.
+Agents must distinguish source excerpts from full text and keep interpretations
+in the summary field. Findings should cite the original URL and passage.
+
+Click a Codex or Claude Code command activity to open its execution in the
+read-only Agent Terminal. The execution selector shows recent records from
+Synara's existing project conversations. Synara restores available history
+after a restart and Lattice keeps no separate transcript on disk. Output and
+exit status depend on what the provider captures. Use the Agent panel's
+existing Stop control to interrupt its turn. The user's terminal remains a
+separate shell.
 
 - `pnpm prepare:synara:dev` accepts a dirty local Synara checkout for development.
 - `pnpm prepare:synara` is the release path. It refuses a dirty checkout or a revision that differs

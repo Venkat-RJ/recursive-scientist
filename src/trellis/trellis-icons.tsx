@@ -4,8 +4,8 @@
  */
 import type { ReactNode } from "react";
 import {
-  ArrowRightLeft, BookOpen, BookPlus, Bot, ClipboardCheck, Columns2, Crosshair, EyeOff, FileCheck, FileCode2,
-  FileText, FolderInput, FolderPlus, FolderTree, GitBranch, Hammer, History, Leaf, Library, ListChecks, ListTodo, Maximize2, MessageSquare,
+  Activity, ArrowRightLeft, BookOpen, BookOpenCheck, BookPlus, Bot, ClipboardCheck, Columns2, Crosshair, EyeOff, FileCheck, FileCode2, FlaskConical,
+  FileText, FolderInput, FolderPlus, FolderTree, GitBranch, Globe, Hammer, History, Leaf, Library, ListChecks, ListTodo, Maximize2, MessageSquare, Network,
   Minimize2, PenLine, PictureInPicture2, Pin, PinOff, Presentation, RefreshCw, RotateCw, Rows2, Search, Settings2, Shapes, Sparkles, Square, Table2,
   X, XCircle,
 } from "lucide-react";
@@ -50,8 +50,15 @@ export const PANEL_ICONS: Record<TrellisSingleton, ReactNode> = {
   comments: <MessageSquare size={14} />,
   overleaf: <Leaf size={14} />,
   literature: <BookOpen size={14} />,
+  "web-knowledge": <Globe size={14} />,
+  "github-knowledge": <GitBranch size={14} />,
   todos: <ListTodo size={14} />,
   checklist: <ClipboardCheck size={14} />,
+  "mind-map": <Network size={14} />,
+  formulation: <Crosshair size={14} />,
+  "prior-knowledge": <BookOpenCheck size={14} />,
+  experiments: <FlaskConical size={14} />,
+  "research-progress": <Activity size={14} />,
   start: <ListChecks size={14} />,
 };
 

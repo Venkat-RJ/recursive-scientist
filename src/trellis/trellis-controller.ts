@@ -23,7 +23,7 @@ import { terminalHome } from "../terminal/terminal-layout";
 import type { SwitchState } from "../canvas/after-switch";
 
 /** Drawers that become dockable tool panels, keyed by their Trellis view type. */
-export const TOOL_KINDS = ["history", "git", "comments", "overleaf", "literature", "todos", "checklist", "start"] as const;
+export const TOOL_KINDS = ["history", "git", "comments", "overleaf", "literature", "web-knowledge", "github-knowledge", "todos", "checklist", "mind-map", "formulation", "prior-knowledge", "experiments", "research-progress", "start"] as const;
 export type TrellisToolKind = typeof TOOL_KINDS[number];
 
 /** Which drawer (by the class it passes to ResizableDrawer) docks as which tool panel. */
@@ -34,8 +34,15 @@ const DRAWER_TOOL_CLASSES: Array<[string, TrellisToolKind]> = [
   // With an Overleaf link the comments surface becomes Overleaf's chat, comments and review.
   ["overleaf-collab-drawer", "overleaf"],
   ["literature-drawer", "literature"],
+  ["web-knowledge-drawer", "web-knowledge"],
+  ["github-knowledge-drawer", "github-knowledge"],
   ["todo-drawer", "todos"],
   ["checklist-drawer", "checklist"],
+  ["mind-map-drawer", "mind-map"],
+  ["experiments-drawer", "experiments"],
+  ["research-progress-drawer", "research-progress"],
+  ["formulation-drawer", "formulation"],
+  ["prior-knowledge-drawer", "prior-knowledge"],
   ["get-started-drawer", "start"],
 ];
 
@@ -657,8 +664,14 @@ export class TrellisController {
       case "project": return into("agent") ?? near("papers", "top", 0.62) ?? besideDocuments("left", 0.3);
       case "agent": return into("project") ?? near("papers", "top", 0.62) ?? besideDocuments("left", 0.3);
       case "papers": return near("project", "bottom", 0.38) ?? near("agent", "bottom", 0.38) ?? besideDocuments("left", 0.25);
+      case "github-knowledge": return into("web-knowledge") ?? into("papers") ?? into("literature") ?? besideDocuments("left", 0.25);
+      case "web-knowledge": return into("papers") ?? into("literature") ?? besideDocuments("left", 0.25);
       case "pdf": return besideDocuments("right", 0.42);
       case "comments": return into("pdf") ?? besideDocuments("right", 0.36);
+      case "formulation":
+      case "prior-knowledge":
+      case "experiments":
+      case "research-progress": return besideDocuments("right", 0.38);
       case "terminal": return terminalHome(ws);
       default: return into("agent") ?? into("project") ?? besideDocuments("right", 0.32);
     }
@@ -825,7 +838,7 @@ export class TrellisController {
     // Annotations and Get started stand beside the document, not as tabs of
     // its panel: with the PDF and with Project, else beside the documents.
     // Once placed, they stay where the writer puts them.
-    if (kind === "comments" || kind === "start") {
+    if (kind === "github-knowledge" || kind === "web-knowledge" || kind === "comments" || kind === "start" || kind === "experiments" || kind === "formulation" || kind === "prior-knowledge" || kind === "research-progress") {
       if (existing) ws.focus(existing.id);
       else ws.open(kind, { id: kind, placement: this.homeOf(kind) });
       return;
