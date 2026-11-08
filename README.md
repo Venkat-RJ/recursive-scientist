@@ -1,20 +1,27 @@
 <div align="center">
 
 <a href="https://leo1oel.github.io/lattice/">
-  <img src="./src-tauri/icons/app-icon.svg" alt="Lattice" width="80" />
+  <img src="./src-tauri/icons/app-icon.svg" alt="Lattice upstream icon" width="80" />
 </a>
 
-<h1>Lattice</h1>
+<h1>Recursive Scientist</h1>
 
-A local-first LaTeX workspace for macOS, with your papers, your co-authors and an AI agent in the same window
+A local-first research workbench for macOS. Formulate a question, gather evidence, test hypotheses, and use the results to decide what to investigate next.
 
-[Download](https://github.com/leo1oel/lattice/releases/latest)&emsp;[Try it in your browser](https://leo1oel.github.io/lattice/demo/)&emsp;[Website](https://leo1oel.github.io/lattice/)&emsp;[Watch the film](https://leo1oel.github.io/lattice/#film)&emsp;[Release notes](https://github.com/leo1oel/lattice/releases)&emsp;[Developer docs](docs/README.md)&emsp;[Issues](https://github.com/leo1oel/lattice/issues)&emsp;[中文](README.zh-CN.md)
+[Build from source](CONTRIBUTING.md)&emsp;[Developer docs](docs/README.md)&emsp;[Upstream Lattice](https://github.com/leo1oel/lattice)&emsp;[上游中文文档](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/leo1oel/lattice?style=flat-square&label=release&color=556324)](https://github.com/leo1oel/lattice/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/leo1oel/lattice/ci.yml?branch=main&style=flat-square&label=checks)](https://github.com/leo1oel/lattice/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-556324?style=flat-square)](LICENSE)
 
 </div>
+
+## The research loop
+
+1. **Formulate the problem.** Record the question, constraints, baseline, and what would count as evidence.
+2. **Gather prior knowledge.** Search papers, the web, and GitHub. Save readable excerpts with links and separate notes so you and your agent can revisit the evidence.
+3. **Map hypotheses and run experiments.** Use the Mind Map and Experiments panels to connect ideas to tests and keep a record of outcomes.
+4. **Review progress and decide what to test next.** Compare results against the objective and carry findings and open questions into the next iteration.
+
+Recursive Scientist is under development and builds on [Lattice](https://github.com/leo1oel/lattice). The screenshots below show the inherited writing workspace.
 
 <p align="center">
   <picture>
@@ -85,6 +92,8 @@ Open any entry to see its diff and restore a file, or **Compare…** any two ver
 The Git panel shows changes and pull requests when the project is a repository.
 
 ## Install
+
+Build Recursive Scientist from source using [CONTRIBUTING.md](CONTRIBUTING.md). The following instructions are for upstream Lattice releases.
 
 Lattice runs on Apple Silicon Macs with macOS 14 or later, and builds with your own [MacTeX](https://tug.org/mactex/) or TeX Live.
 No TeX yet? Lattice offers to install BasicTeX for you: it is the first step of the Get started checklist, and a build that finds no TeX offers it too.
